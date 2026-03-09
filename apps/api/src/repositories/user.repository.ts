@@ -9,6 +9,7 @@ export class UserRepository {
         name: true,
         username: true,
         role: true,
+        can_view_cost_price: true,
         is_active: true,
         created_at: true,
         updated_at: true,
@@ -33,6 +34,7 @@ export class UserRepository {
     username: string;
     password_hash: string;
     role: string;
+    can_view_cost_price?: boolean;
   }) {
     return prisma.user.create({ data });
   }

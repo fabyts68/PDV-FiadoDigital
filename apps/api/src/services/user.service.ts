@@ -33,6 +33,7 @@ export class UserService {
       username: payload.username,
       password_hash: passwordHash,
       role: payload.role,
+      can_view_cost_price: payload.can_view_cost_price ?? false,
     });
   }
 

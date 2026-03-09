@@ -8,7 +8,13 @@ const userRepository = new UserRepository();
 type AuthResult = {
   accessToken: string;
   refreshToken: string;
-  user: { id: string; name: string; username: string; role: string };
+  user: {
+    id: string;
+    name: string;
+    username: string;
+    role: string;
+    can_view_cost_price: boolean;
+  };
 };
 
 export class AuthService {
@@ -35,13 +41,29 @@ export class AuthService {
     return {
       accessToken,
       refreshToken,
-      user: { id: user.id, name: user.name, username: user.username, role: user.role },
+      user: {
+        id: user.id,
+        name: user.name,
+        username: user.username,
+        role: user.role,
+        can_view_cost_price: user.can_view_cost_price,
+      },
     };
   }
 
   async refresh(
     refreshToken: string,
-  ): Promise<{ accessToken: string; refreshToken: string; user: { id: string; name: string; username: string; role: string } }> {
+  ): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    user: {
+      id: string;
+      name: string;
+      username: string;
+      role: string;
+      can_view_cost_price: boolean;
+    };
+  }> {
     const payload = jwt.verify(refreshToken, config.jwt.refreshSecret) as {
       sub: string;
     };
@@ -58,7 +80,13 @@ export class AuthService {
     return { 
       accessToken: newAccessToken, 
       refreshToken: newRefreshToken,
-      user: { id: user.id, name: user.name, username: user.username, role: user.role },
+      user: {
+        id: user.id,
+        name: user.name,
+        username: user.username,
+        role: user.role,
+        can_view_cost_price: user.can_view_cost_price,
+      },
     };
   }
 

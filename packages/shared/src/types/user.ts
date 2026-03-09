@@ -5,6 +5,7 @@ export type User = {
   name: string;
   username: string;
   role: Role;
+  can_view_cost_price: boolean;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -15,4 +16,5 @@ export type CreateUserPayload = {
   username: string;
   password: string;
   role: Role;
+  can_view_cost_price?: boolean;
 };

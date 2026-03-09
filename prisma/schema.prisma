@@ -23,6 +23,7 @@ model User {
   password_hash String
   pin_hash      String?
   role          String    // admin | manager | stockist | operator
+  can_view_cost_price Boolean @default(false)
   is_active     Boolean   @default(true)
   created_at    DateTime  @default(now())
   updated_at    DateTime  @updatedAt
@@ -67,7 +68,12 @@ model Product {
   id              String    @id @default(uuid())
   name            String
   barcode         String?   @unique
+  brand_id        String?
   description     String?
+  weight_value    Float?
+  weight_unit     String?
+  product_type_id String?
+  profit_margin   Float?
   price_cents     Int
   cost_price_cents Int
   stock_quantity  Int       @default(0)
@@ -77,11 +83,41 @@ model Product {
   updated_at      DateTime  @updatedAt
   deleted_at      DateTime?
 
+  brand       Brand?       @relation(fields: [brand_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  product_type ProductType? @relation(fields: [product_type_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
   sale_items SaleItem[]
 
   @@index([barcode])
   @@index([name])
+  @@index([brand_id])
+  @@index([product_type_id])
   @@map("product")
+}
+
+model Brand {
+  id         String    @id @default(uuid())
+  name       String    @unique
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+  deleted_at DateTime?
+  products   Product[]
+
+  @@map("brands")
+}
+
+// ------------------------------------------
+// ProductType — Classificação de produtos
+// ------------------------------------------
+model ProductType {
+  id         String    @id @default(uuid())
+  name       String    @unique
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+  deleted_at DateTime?
+
+  products Product[]
+
+  @@map("product_types")
 }
 
 // ------------------------------------------

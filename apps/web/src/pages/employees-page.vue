@@ -1,16 +1,19 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { computed, onMounted, ref } from "vue";
 import AppHeader from "@/components/layout/app-header.vue";
 import AppSidebar from "@/components/layout/app-sidebar.vue";
 import { useApi } from "@/composables/use-api.js";
+import { useAuthStore } from "@/stores/auth.store.js";
 
 const { authenticatedFetch } = useApi();
+const authStore = useAuthStore();
 
 interface Employee {
   id: string;
   name: string;
   username: string;
   role: "stockist" | "operator";
+  can_view_cost_price: boolean;
   is_active: boolean;
 }
 
@@ -20,6 +23,7 @@ interface FormData {
   password: string;
   confirmPassword: string;
   role: "stockist" | "operator";
+  can_view_cost_price: boolean;
   is_active: boolean;
 }
 
@@ -39,6 +43,10 @@ const toastMessage = ref("");
 const isEditMode = ref(false);
 const editingId = ref<string | null>(null);
 const loading = ref(false);
+const canManageCostVisibility = computed(() => {
+  const role = authStore.user?.role;
+  return role === "admin" || role === "manager";
+});
 
 const formData = ref<FormData>({
   name: "",
@@ -46,6 +54,7 @@ const formData = ref<FormData>({
   password: "",
   confirmPassword: "",
   role: "operator",
+  can_view_cost_price: false,
   is_active: true,
 });
 
@@ -117,6 +126,7 @@ function openCreateModal(): void {
     password: "",
     confirmPassword: "",
     role: "operator",
+    can_view_cost_price: false,
     is_active: true,
   };
   formErrors.value = {};
@@ -132,6 +142,7 @@ function openEditModal(employee: Employee): void {
     password: "",
     confirmPassword: "",
     role: employee.role,
+    can_view_cost_price: employee.can_view_cost_price,
     is_active: employee.is_active,
   };
   formErrors.value = {};
@@ -146,6 +157,7 @@ function closeModal(): void {
     password: "",
     confirmPassword: "",
     role: "operator",
+    can_view_cost_price: false,
     is_active: true,
   };
   formErrors.value = {};
@@ -173,6 +185,7 @@ async function submitForm(): Promise<void> {
       username: formData.value.username,
       ...(formData.value.password && { password: formData.value.password }),
       role: formData.value.role,
+      can_view_cost_price: formData.value.can_view_cost_price,
     };
 
     const url = isEditMode.value ? `/api/users/${editingId.value}` : "/api/users";
@@ -219,6 +232,7 @@ async function toggleStatus(employee: Employee): Promise<void> {
         name: employee.name,
         username: employee.username,
         role: employee.role,
+        can_view_cost_price: employee.can_view_cost_price,
         is_active: !employee.is_active,
       }),
     });
@@ -430,6 +444,18 @@ async function toggleStatus(employee: Employee): Promise<void> {
                 <div v-if="formErrors.role" class="mt-1 text-xs text-danger">
                   {{ formErrors.role[0] }}
                 </div>
+              </div>
+
+              <div v-if="canManageCostVisibility" class="flex items-center gap-2">
+                <input
+                  id="can_view_cost_price"
+                  v-model="formData.can_view_cost_price"
+                  type="checkbox"
+                  class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-primary/20"
+                />
+                <label for="can_view_cost_price" class="text-sm font-medium text-gray-700">
+                  Permitir visualizar preço de custo
+                </label>
               </div>
 
               <!-- Situação -->

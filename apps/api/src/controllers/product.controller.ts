@@ -4,9 +4,11 @@ import { ProductService } from "../services/product.service.js";
 const productService = new ProductService();
 
 export class ProductController {
-  async list(_req: Request, res: Response, next: NextFunction): Promise<void> {
+  async list(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const products = await productService.list();
+      const barcode =
+        typeof req.query.barcode === "string" ? req.query.barcode.trim() : undefined;
+      const products = await productService.list(barcode || undefined);
       res.json({ success: true, data: products });
     } catch (error) {
       next(error);
@@ -47,6 +49,19 @@ export class ProductController {
     try {
       const product = await productService.update(req.params.id as string, req.body);
       res.json({ success: true, data: product });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async bulkUpdatePrice(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    try {
+      const result = await productService.bulkUpdatePrice(req.body);
+      res.json({ success: true, data: result });
     } catch (error) {
       next(error);
     }
