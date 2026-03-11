@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { formatCents } from "@pdv/shared";
+import { formatCents, PAYMENT_METHODS, type SaleWithPayments } from "@pdv/shared";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import AppHeader from "@/components/layout/app-header.vue";
 import AppSidebar from "@/components/layout/app-sidebar.vue";
@@ -45,8 +45,30 @@ interface PaymentFormErrors {
 
 type SortBy = "name" | "credit_limit_cents" | "payment_due_day" | "current_debt_cents" | "is_active";
 type SortOrder = "asc" | "desc";
+type TabKey = "customers" | "purchase-history" | "payment-history";
+
+interface FiadoHistorySummary {
+  fiado_period_cents: number;
+  fiado_open_cents: number;
+  fiado_paid_cents: number;
+}
+
+interface FiadoPaymentHistorySummary {
+  total_paid_period_cents: number;
+  fiado_open_cents: number;
+}
+
+interface PaymentHistoryRow {
+  id: string;
+  amount_cents: number;
+  debt_before_cents: number | null;
+  description: string | null;
+  created_at: string;
+}
 
 const { authenticatedFetch } = useApi();
+
+const activeTab = ref<TabKey>("customers");
 
 const customers = ref<Customer[]>([]);
 const loadingList = ref(false);
@@ -79,6 +101,45 @@ const paymentLoading = ref(false);
 const showToast = ref(false);
 const toastMessage = ref("");
 
+const allCustomersForHistory = ref<Customer[]>([]);
+const loadingHistoryCustomers = ref(false);
+const historyCustomersError = ref<string | null>(null);
+const historyCustomerSearchInput = ref("");
+const showHistoryCustomerDropdown = ref(false);
+const selectedHistoryCustomer = ref<Customer | null>(null);
+
+const fiadoHistoryRows = ref<SaleWithPayments[]>([]);
+const loadingFiadoHistory = ref(false);
+const fiadoHistoryError = ref<string | null>(null);
+const fiadoHistoryPage = ref(1);
+const fiadoHistoryPerPage = ref(10);
+const fiadoHistoryTotal = ref(0);
+const fiadoHistoryTotalPages = ref(0);
+const fiadoHistorySummary = ref<FiadoHistorySummary>({
+  fiado_period_cents: 0,
+  fiado_open_cents: 0,
+  fiado_paid_cents: 0,
+});
+
+const paymentHistoryRows = ref<PaymentHistoryRow[]>([]);
+const loadingPaymentHistory = ref(false);
+const paymentHistoryError = ref<string | null>(null);
+const paymentHistoryPage = ref(1);
+const paymentHistoryPerPage = ref(10);
+const paymentHistoryTotal = ref(0);
+const paymentHistoryTotalPages = ref(0);
+const paymentHistorySummary = ref<FiadoPaymentHistorySummary>({
+  total_paid_period_cents: 0,
+  fiado_open_cents: 0,
+});
+
+const currentDate = new Date();
+const selectedHistoryMonth = ref(currentDate.getMonth() + 1);
+const selectedHistoryYear = ref(currentDate.getFullYear());
+
+const showReceiptModal = ref(false);
+const selectedReceiptSale = ref<SaleWithPayments | null>(null);
+
 const debtVisibilityByCustomerId = ref<Record<string, boolean>>({});
 
 const formData = ref<FormData>({
@@ -110,6 +171,81 @@ const totalPagesArray = computed(() => {
   return pages;
 });
 
+const fiadoHistoryPagesArray = computed(() => {
+  const pages = [];
+  const maxPagesToShow = 5;
+  const half = Math.floor(maxPagesToShow / 2);
+
+  let start = Math.max(1, fiadoHistoryPage.value - half);
+  let end = Math.min(fiadoHistoryTotalPages.value, start + maxPagesToShow - 1);
+
+  if (end - start + 1 < maxPagesToShow) {
+    start = Math.max(1, end - maxPagesToShow + 1);
+  }
+
+  for (let i = start; i <= end; i++) {
+    pages.push(i);
+  }
+
+  return pages;
+});
+
+const paymentHistoryPagesArray = computed(() => {
+  const pages = [];
+  const maxPagesToShow = 5;
+  const half = Math.floor(maxPagesToShow / 2);
+
+  let start = Math.max(1, paymentHistoryPage.value - half);
+  let end = Math.min(paymentHistoryTotalPages.value, start + maxPagesToShow - 1);
+
+  if (end - start + 1 < maxPagesToShow) {
+    start = Math.max(1, end - maxPagesToShow + 1);
+  }
+
+  for (let i = start; i <= end; i++) {
+    pages.push(i);
+  }
+
+  return pages;
+});
+
+const monthOptions = [
+  { value: 1, label: "Janeiro" },
+  { value: 2, label: "Fevereiro" },
+  { value: 3, label: "Março" },
+  { value: 4, label: "Abril" },
+  { value: 5, label: "Maio" },
+  { value: 6, label: "Junho" },
+  { value: 7, label: "Julho" },
+  { value: 8, label: "Agosto" },
+  { value: 9, label: "Setembro" },
+  { value: 10, label: "Outubro" },
+  { value: 11, label: "Novembro" },
+  { value: 12, label: "Dezembro" },
+];
+
+const yearOptions = computed(() => {
+  const currentYear = new Date().getFullYear();
+  return Array.from({ length: 5 }, (_, index) => currentYear - index);
+});
+
+const filteredHistoryCustomers = computed(() => {
+  const term = historyCustomerSearchInput.value.trim().toLowerCase();
+
+  if (!term) {
+    return allCustomersForHistory.value.slice(0, 12);
+  }
+
+  return allCustomersForHistory.value
+    .filter((customer) => {
+      return (
+        customer.name.toLowerCase().includes(term) ||
+        (customer.phone || "").includes(term)
+      );
+    })
+    .slice(0, 12);
+});
+
 onMounted(async () => {
   await loadCustomers();
   window.addEventListener("keydown", handleEscapeKey);
@@ -125,6 +261,51 @@ watch(() => searchInput.value, () => {
   debouncedSearch();
 });
 
+watch(
+  () => activeTab.value,
+  async (tab) => {
+    if (tab !== "purchase-history" && tab !== "payment-history") {
+      return;
+    }
+
+    if (allCustomersForHistory.value.length === 0) {
+      await loadHistoryCustomers();
+    }
+
+    if (!selectedHistoryCustomer.value) {
+      return;
+    }
+
+    if (tab === "purchase-history") {
+      await loadFiadoHistory();
+      return;
+    }
+
+    await loadPaymentHistory();
+  },
+);
+
+watch(
+  () => [selectedHistoryMonth.value, selectedHistoryYear.value],
+  async () => {
+    if (!selectedHistoryCustomer.value) {
+      return;
+    }
+
+    fiadoHistoryPage.value = 1;
+    paymentHistoryPage.value = 1;
+
+    if (activeTab.value === "purchase-history") {
+      await loadFiadoHistory();
+      return;
+    }
+
+    if (activeTab.value === "payment-history") {
+      await loadPaymentHistory();
+    }
+  },
+);
+
 function handleEscapeKey(event: KeyboardEvent): void {
   if (event.key !== "Escape") {
     return;
@@ -137,7 +318,172 @@ function handleEscapeKey(event: KeyboardEvent): void {
 
   if (showPaymentModal.value) {
     closePaymentModal();
+    return;
   }
+
+  if (showReceiptModal.value) {
+    closeReceiptModal();
+    return;
+  }
+
+  if (showHistoryCustomerDropdown.value) {
+    showHistoryCustomerDropdown.value = false;
+  }
+}
+
+function formatDateDay(dateTime: string): string {
+  const date = new Date(dateTime);
+  return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+}
+
+function formatTime(dateTime: string): string {
+  const date = new Date(dateTime);
+  return date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
+function extractPaymentMetadata(row: PaymentHistoryRow): { type: "full" | "partial"; debtBefore: number | null } {
+  if (!row.description) {
+    return { type: "partial", debtBefore: row.debt_before_cents };
+  }
+
+  try {
+    const parsed = JSON.parse(row.description) as { type?: string; debt_before?: number };
+
+    return {
+      type: parsed.type === "full" ? "full" : "partial",
+      debtBefore: typeof parsed.debt_before === "number" ? parsed.debt_before : row.debt_before_cents,
+    };
+  } catch {
+    return { type: "partial", debtBefore: row.debt_before_cents };
+  }
+}
+
+function getPaymentHistoryTypeLabel(row: PaymentHistoryRow): string {
+  const metadata = extractPaymentMetadata(row);
+  return metadata.type === "full" ? "Completo" : "Parcial";
+}
+
+function getPaymentHistoryDebtBeforeCents(row: PaymentHistoryRow): number {
+  const metadata = extractPaymentMetadata(row);
+  return metadata.debtBefore ?? 0;
+}
+
+function formatDateTimeWithConnector(dateTime: string): string {
+  const date = new Date(dateTime);
+  const datePart = date.toLocaleDateString("pt-BR");
+  const timePart = date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  return `${datePart} às ${timePart}`;
+}
+
+function getPaymentMethodLabel(method: string): string {
+  if (method === PAYMENT_METHODS.CASH) {
+    return "Dinheiro";
+  }
+
+  if (method === PAYMENT_METHODS.PIX) {
+    return "Pix";
+  }
+
+  if (method === PAYMENT_METHODS.CREDIT_CARD) {
+    return "Cartão de Crédito";
+  }
+
+  if (method === PAYMENT_METHODS.DEBIT_CARD) {
+    return "Cartão de Débito";
+  }
+
+  if (method === PAYMENT_METHODS.FIADO) {
+    return "Fiado";
+  }
+
+  return method;
+}
+
+function getFiadoAmountCents(sale: SaleWithPayments): number {
+  const fiadoPayment = sale.payments?.find((payment) => payment.method === PAYMENT_METHODS.FIADO);
+
+  if (fiadoPayment) {
+    return fiadoPayment.amount_cents;
+  }
+
+  return sale.payment_method === PAYMENT_METHODS.FIADO ? sale.total_cents : 0;
+}
+
+function getPaymentTypeLabel(sale: SaleWithPayments): string {
+  if (sale.payment_method === PAYMENT_METHODS.FIADO) {
+    return "fiado";
+  }
+
+  const uniqueMethods = Array.from(new Set(sale.payments.map((payment) => payment.method)));
+
+  if (uniqueMethods.length <= 1) {
+    return "fiado + outro";
+  }
+
+  return uniqueMethods.map((method) => getPaymentMethodLabel(method).toLowerCase()).join(" + ");
+}
+
+function getReceiptItemName(productName: string): string {
+  return productName.trim() || "Produto não identificado";
+}
+
+function getUnitPriceFromItem(item: SaleWithPayments["items"][number]): number {
+  return item.unit_price_cents;
+}
+
+function openHistoryCustomerDropdown(): void {
+  showHistoryCustomerDropdown.value = true;
+}
+
+function selectHistoryCustomer(customer: Customer): void {
+  selectedHistoryCustomer.value = customer;
+  historyCustomerSearchInput.value = customer.name;
+  showHistoryCustomerDropdown.value = false;
+  fiadoHistoryPage.value = 1;
+  paymentHistoryPage.value = 1;
+
+  if (activeTab.value === "payment-history") {
+    loadPaymentHistory();
+    return;
+  }
+
+  loadFiadoHistory();
+}
+
+function clearSelectedHistoryCustomer(): void {
+  selectedHistoryCustomer.value = null;
+  historyCustomerSearchInput.value = "";
+  fiadoHistoryRows.value = [];
+  fiadoHistoryError.value = null;
+  fiadoHistoryTotal.value = 0;
+  fiadoHistoryTotalPages.value = 0;
+  fiadoHistorySummary.value = {
+    fiado_period_cents: 0,
+    fiado_open_cents: 0,
+    fiado_paid_cents: 0,
+  };
+  paymentHistoryRows.value = [];
+  paymentHistoryError.value = null;
+  paymentHistoryTotal.value = 0;
+  paymentHistoryTotalPages.value = 0;
+  paymentHistorySummary.value = {
+    total_paid_period_cents: 0,
+    fiado_open_cents: 0,
+  };
+}
+
+function openReceiptModal(sale: SaleWithPayments): void {
+  selectedReceiptSale.value = sale;
+  showReceiptModal.value = true;
+}
+
+function closeReceiptModal(): void {
+  selectedReceiptSale.value = null;
+  showReceiptModal.value = false;
+}
+
+function printReceipt(): void {
+  window.print();
 }
 
 function normalizePhoneDigits(rawValue: string): string {
@@ -339,6 +685,159 @@ function clearSearch(): void {
   currentPage.value = 1;
 }
 
+async function loadHistoryCustomers(): Promise<void> {
+  loadingHistoryCustomers.value = true;
+  historyCustomersError.value = null;
+
+  try {
+    const response = await authenticatedFetch("/api/customers?only_active=false&per_page=100&sort_by=name&sort_order=asc");
+    const data = await response.json();
+
+    if (!response.ok) {
+      historyCustomersError.value = data.message || "Não foi possível carregar os clientes.";
+      return;
+    }
+
+    allCustomersForHistory.value = data.data as Customer[];
+  } catch (error) {
+    console.error("Erro ao carregar clientes para histórico:", error);
+    historyCustomersError.value = "Erro de conexão ao carregar clientes.";
+  } finally {
+    loadingHistoryCustomers.value = false;
+  }
+}
+
+async function loadFiadoHistory(): Promise<void> {
+  if (!selectedHistoryCustomer.value) {
+    return;
+  }
+
+  loadingFiadoHistory.value = true;
+  fiadoHistoryError.value = null;
+
+  try {
+    const params = new URLSearchParams({
+      page: String(fiadoHistoryPage.value),
+      per_page: String(fiadoHistoryPerPage.value),
+      month: String(selectedHistoryMonth.value),
+      year: String(selectedHistoryYear.value),
+    });
+
+    const response = await authenticatedFetch(
+      `/api/customers/${selectedHistoryCustomer.value.id}/fiado-history?${params}`,
+    );
+    const data = await response.json();
+
+    if (!response.ok) {
+      fiadoHistoryError.value = data.message || "Não foi possível carregar o histórico de compras.";
+      return;
+    }
+
+    fiadoHistoryRows.value = data.data as SaleWithPayments[];
+    fiadoHistoryTotal.value = data.pagination.total;
+    fiadoHistoryTotalPages.value = data.pagination.total_pages;
+    fiadoHistoryPage.value = data.pagination.page;
+    fiadoHistorySummary.value = {
+      fiado_period_cents: data.summary?.fiado_period_cents ?? 0,
+      fiado_open_cents: data.summary?.fiado_open_cents ?? 0,
+      fiado_paid_cents: data.summary?.fiado_paid_cents ?? 0,
+    };
+  } catch (error) {
+    console.error("Erro ao carregar histórico de fiado:", error);
+    fiadoHistoryError.value = "Erro de conexão ao carregar histórico de compras.";
+  } finally {
+    loadingFiadoHistory.value = false;
+  }
+}
+
+async function loadPaymentHistory(): Promise<void> {
+  if (!selectedHistoryCustomer.value) {
+    return;
+  }
+
+  loadingPaymentHistory.value = true;
+  paymentHistoryError.value = null;
+
+  try {
+    const params = new URLSearchParams({
+      page: String(paymentHistoryPage.value),
+      per_page: String(paymentHistoryPerPage.value),
+      month: String(selectedHistoryMonth.value),
+      year: String(selectedHistoryYear.value),
+    });
+
+    const response = await authenticatedFetch(
+      `/api/customers/${selectedHistoryCustomer.value.id}/payment-history?${params}`,
+    );
+    const data = await response.json();
+
+    if (!response.ok) {
+      paymentHistoryError.value = data.message || "Não foi possível carregar o histórico de pagamentos.";
+      return;
+    }
+
+    paymentHistoryRows.value = data.data as PaymentHistoryRow[];
+    paymentHistoryTotal.value = data.pagination.total;
+    paymentHistoryTotalPages.value = data.pagination.total_pages;
+    paymentHistoryPage.value = data.pagination.page;
+    paymentHistorySummary.value = {
+      total_paid_period_cents: data.summary?.total_paid_period_cents ?? 0,
+      fiado_open_cents: data.summary?.fiado_open_cents ?? 0,
+    };
+  } catch (error) {
+    console.error("Erro ao carregar histórico de pagamentos:", error);
+    paymentHistoryError.value = "Erro de conexão ao carregar histórico de pagamentos.";
+  } finally {
+    loadingPaymentHistory.value = false;
+  }
+}
+
+function goToFiadoHistoryPage(page: number): void {
+  fiadoHistoryPage.value = page;
+  loadFiadoHistory();
+}
+
+function goToPreviousFiadoHistoryPage(): void {
+  if (fiadoHistoryPage.value <= 1) {
+    return;
+  }
+
+  fiadoHistoryPage.value--;
+  loadFiadoHistory();
+}
+
+function goToNextFiadoHistoryPage(): void {
+  if (fiadoHistoryPage.value >= fiadoHistoryTotalPages.value) {
+    return;
+  }
+
+  fiadoHistoryPage.value++;
+  loadFiadoHistory();
+}
+
+function goToPaymentHistoryPage(page: number): void {
+  paymentHistoryPage.value = page;
+  loadPaymentHistory();
+}
+
+function goToPreviousPaymentHistoryPage(): void {
+  if (paymentHistoryPage.value <= 1) {
+    return;
+  }
+
+  paymentHistoryPage.value--;
+  loadPaymentHistory();
+}
+
+function goToNextPaymentHistoryPage(): void {
+  if (paymentHistoryPage.value >= paymentHistoryTotalPages.value) {
+    return;
+  }
+
+  paymentHistoryPage.value++;
+  loadPaymentHistory();
+}
+
 function goToPage(page: number): void {
   currentPage.value = page;
   loadCustomers();
@@ -457,7 +956,7 @@ function validatePaymentForm(): boolean {
   paymentFormErrors.value = {};
 
   if (!selectedPaymentCustomer.value) {
-    paymentFormErrors.value.submit = ["Cliente não selecionado"];
+    paymentFormErrors.value.submit = "Cliente não selecionado";
     return false;
   }
 
@@ -554,6 +1053,7 @@ async function submitPaymentForm(): Promise<void> {
     amount_cents: amountCents,
     pin: paymentFormData.value.pin,
   };
+  const paidCustomerId = selectedPaymentCustomer.value.id;
 
   try {
     const response = await authenticatedFetch(`/api/customers/${selectedPaymentCustomer.value.id}/pay-debt`, {
@@ -572,6 +1072,17 @@ async function submitPaymentForm(): Promise<void> {
 
     closePaymentModal();
     await loadCustomers();
+
+    if (selectedHistoryCustomer.value?.id === paidCustomerId) {
+      if (activeTab.value === "purchase-history") {
+        await loadFiadoHistory();
+      }
+
+      if (activeTab.value === "payment-history") {
+        await loadPaymentHistory();
+      }
+    }
+
     showSuccessToast("Pagamento de fiado registrado com sucesso!");
   } catch (error) {
     console.error("Erro ao registrar pagamento:", error);
@@ -588,66 +1099,111 @@ async function submitPaymentForm(): Promise<void> {
     <div class="flex flex-1 flex-col">
       <AppHeader />
       <main class="flex-1 p-6">
-        <div class="mb-6 flex items-center justify-between">
+        <div class="flex flex-wrap items-center justify-between gap-4">
           <h1 class="text-3xl font-bold text-gray-900">Clientes</h1>
+        </div>
+
+        <!-- Tabs -->
+        <div class="mt-6 flex items-center gap-2 border-b border-gray-200">
           <button
             type="button"
-            @click="openCreateModal"
-            class="rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark"
+            :class="[
+              'rounded-t-lg px-4 py-2 text-sm font-semibold transition',
+              activeTab === 'customers'
+                ? 'bg-primary text-white'
+                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+            ]"
+            @click="activeTab = 'customers'"
           >
-            + Novo Cliente
+            Clientes
+          </button>
+          <button
+            type="button"
+            :class="[
+              'rounded-t-lg px-4 py-2 text-sm font-semibold transition',
+              activeTab === 'purchase-history'
+                ? 'bg-primary text-white'
+                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+            ]"
+            @click="activeTab = 'purchase-history'"
+          >
+            Histórico de Compras
+          </button>
+          <button
+            type="button"
+            :class="[
+              'rounded-t-lg px-4 py-2 text-sm font-semibold transition',
+              activeTab === 'payment-history'
+                ? 'bg-primary text-white'
+                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+            ]"
+            @click="activeTab = 'payment-history'"
+          >
+            Histórico de Pagamentos
           </button>
         </div>
 
-        <!-- Search Bar -->
-        <div class="mb-6 flex gap-2">
-          <input
-            v-model="searchInput"
-            type="text"
-            placeholder="Buscar por nome ou telefone..."
-            class="flex-1 rounded border border-gray-300 px-4 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-          />
-          <button
-            v-if="searchInput"
-            type="button"
-            @click="clearSearch"
-            class="rounded bg-gray-200 px-4 py-2 font-medium text-gray-700 transition hover:bg-gray-300"
+        <!-- ==================== ABA: Clientes ==================== -->
+        <section v-if="activeTab === 'customers'" class="mt-6">
+          <div class="mb-4 flex items-center justify-end">
+            <button
+              type="button"
+              @click="openCreateModal"
+              class="rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark"
+            >
+              + Novo Cliente
+            </button>
+          </div>
+
+          <!-- Search Bar -->
+          <div class="mb-6 flex gap-2">
+            <input
+              v-model="searchInput"
+              type="text"
+              placeholder="Buscar por nome ou telefone..."
+              class="flex-1 rounded border border-gray-300 px-4 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+            />
+            <button
+              v-if="searchInput"
+              type="button"
+              @click="clearSearch"
+              class="rounded bg-gray-200 px-4 py-2 font-medium text-gray-700 transition hover:bg-gray-300"
+            >
+              ✕ Limpar
+            </button>
+          </div>
+
+          <!-- Loading State -->
+          <div v-if="loadingList" class="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
+            <div v-for="index in 6" :key="index" class="h-12 animate-pulse rounded bg-gray-100"></div>
+          </div>
+
+          <!-- Error State -->
+          <div
+            v-else-if="listError"
+            class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-danger"
+            role="alert"
           >
-            ✕ Limpar
-          </button>
-        </div>
+            <p>{{ listError }}</p>
+            <button
+              type="button"
+              @click="loadCustomers"
+              class="mt-3 rounded bg-primary px-3 py-1.5 text-white transition hover:bg-primary-dark"
+            >
+              Tentar novamente
+            </button>
+          </div>
 
-        <!-- Loading State -->
-        <div v-if="loadingList" class="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
-          <div v-for="index in 6" :key="index" class="h-12 animate-pulse rounded bg-gray-100"></div>
-        </div>
-
-        <!-- Error State -->
-        <div
-          v-else-if="listError"
-          class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-danger"
-          role="alert"
-        >
-          <p>{{ listError }}</p>
-          <button
-            type="button"
-            @click="loadCustomers"
-            class="mt-3 rounded bg-primary px-3 py-1.5 text-white transition hover:bg-primary-dark"
+          <!-- Empty State -->
+          <div
+            v-else-if="customers.length === 0"
+            class="rounded-lg border border-gray-200 bg-white p-6 text-center text-gray-600"
           >
-            Tentar novamente
-          </button>
-        </div>
+            Nenhum cliente cadastrado ainda.
+          </div>
 
-        <!-- Empty State -->
-        <div
-          v-else-if="customers.length === 0"
-          class="rounded-lg border border-gray-200 bg-white p-6 text-center text-gray-600"
-        >
-          Nenhum cliente cadastrado ainda.
-        </div>
-
-        <!-- Table -->
-        <div v-else class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+          <!-- Table -->
+          <div v-else class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
           <table class="w-full min-w-[1200px]">
             <thead class="bg-gray-50">
               <tr>
@@ -858,6 +1414,613 @@ async function submitPaymentForm(): Promise<void> {
             >
               Próxima →
             </button>
+          </div>
+        </div>
+        </section>
+
+        <!-- ==================== ABA: Histórico de Compras ==================== -->
+        <section v-if="activeTab === 'purchase-history'" class="mt-6">
+          <div class="mb-6 flex flex-wrap items-end gap-4">
+            <div class="relative w-full max-w-md">
+              <label class="mb-1 block text-sm font-medium text-gray-700">Selecione o cliente</label>
+              <div class="flex gap-2">
+                <input
+                  v-model="historyCustomerSearchInput"
+                  type="text"
+                  placeholder="Buscar por nome ou telefone..."
+                  class="flex-1 rounded border border-gray-300 px-4 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  @focus="openHistoryCustomerDropdown"
+                  @input="openHistoryCustomerDropdown"
+                />
+                <button
+                  v-if="selectedHistoryCustomer"
+                  type="button"
+                  @click="clearSelectedHistoryCustomer"
+                  class="rounded bg-gray-200 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-300"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div
+                v-if="showHistoryCustomerDropdown && !selectedHistoryCustomer"
+                class="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg"
+              >
+                <div v-if="loadingHistoryCustomers" class="p-3 text-center text-sm text-gray-500">
+                  Carregando clientes...
+                </div>
+                <div v-else-if="historyCustomersError" class="p-3 text-sm text-danger">
+                  {{ historyCustomersError }}
+                </div>
+                <div v-else-if="filteredHistoryCustomers.length === 0" class="p-3 text-center text-sm text-gray-500">
+                  Nenhum cliente encontrado.
+                </div>
+                <button
+                  v-for="customer in filteredHistoryCustomers"
+                  :key="customer.id"
+                  type="button"
+                  class="flex w-full items-center justify-between border-b border-gray-100 px-4 py-3 text-left hover:bg-gray-50"
+                  @click="selectHistoryCustomer(customer)"
+                >
+                  <div>
+                    <span class="block text-sm font-medium text-gray-900">{{ customer.name }}</span>
+                    <span class="text-xs text-gray-500">
+                      {{ customer.phone ? formatPhoneForDisplay(customer.phone) : "Sem telefone" }}
+                    </span>
+                  </div>
+                  <span
+                    :class="[
+                      'text-xs font-semibold',
+                      customer.is_active ? 'text-green-700' : 'text-gray-500',
+                    ]"
+                  >
+                    {{ customer.is_active ? "Ativo" : "Inativo" }}
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <div class="flex items-end gap-3">
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Mês</label>
+                <select
+                  v-model.number="selectedHistoryMonth"
+                  class="rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option v-for="month in monthOptions" :key="month.value" :value="month.value">
+                    {{ month.label }}
+                  </option>
+                </select>
+              </div>
+
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Ano</label>
+                <select
+                  v-model.number="selectedHistoryYear"
+                  class="rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option v-for="year in yearOptions" :key="year" :value="year">
+                    {{ year }}
+                  </option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div
+            v-if="!selectedHistoryCustomer"
+            class="rounded-lg border border-gray-200 bg-white p-6 text-center text-gray-600"
+          >
+            Selecione um cliente para visualizar o histórico de compras.
+          </div>
+
+          <div v-else class="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+            <div>
+              <div v-if="loadingFiadoHistory" class="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
+                <div v-for="index in 6" :key="index" class="h-10 animate-pulse rounded bg-gray-100"></div>
+              </div>
+
+              <div
+                v-else-if="fiadoHistoryError"
+                class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-danger"
+                role="alert"
+              >
+                <p>{{ fiadoHistoryError }}</p>
+                <button
+                  type="button"
+                  @click="loadFiadoHistory"
+                  class="mt-3 rounded bg-primary px-3 py-1.5 text-white transition hover:bg-primary-dark"
+                >
+                  Tentar novamente
+                </button>
+              </div>
+
+              <div
+                v-else-if="fiadoHistoryRows.length === 0"
+                class="rounded-lg border border-gray-200 bg-white p-6 text-center text-gray-600"
+              >
+                Nenhuma compra em fiado encontrada para este cliente no período selecionado.
+              </div>
+
+              <template v-else>
+                <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+                  <table class="w-full min-w-[720px]">
+                    <thead class="bg-gray-50">
+                      <tr>
+                        <th class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Dia</th>
+                        <th class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Horário</th>
+                        <th class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Valor em Fiado</th>
+                        <th class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Tipo de Pagamento</th>
+                        <th class="px-6 py-3 text-center text-sm font-semibold text-gray-700">Nota Fiscal</th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200">
+                      <tr v-for="sale in fiadoHistoryRows" :key="sale.id" class="hover:bg-gray-50">
+                        <td class="px-6 py-4 text-sm text-gray-900">{{ formatDateDay(sale.created_at) }}</td>
+                        <td class="px-6 py-4 text-sm text-gray-600">{{ formatTime(sale.created_at) }}</td>
+                        <td class="px-6 py-4 text-sm font-medium text-gray-900">
+                          {{ formatCents(getFiadoAmountCents(sale)) }}
+                        </td>
+                        <td class="px-6 py-4 text-sm text-gray-600">{{ getPaymentTypeLabel(sale) }}</td>
+                        <td class="px-6 py-4 text-center">
+                          <button
+                            type="button"
+                            aria-label="Ver nota fiscal"
+                            class="rounded bg-primary px-3 py-1 text-xs font-semibold text-white transition hover:bg-primary-dark"
+                            @click="openReceiptModal(sale)"
+                          >
+                            NF
+                          </button>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div
+                  v-if="fiadoHistoryTotalPages > 1"
+                  class="mt-6 flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4"
+                >
+                  <div class="text-sm text-gray-600">
+                    Mostrando
+                    <span class="font-semibold">{{ (fiadoHistoryPage - 1) * fiadoHistoryPerPage + 1 }}</span>
+                    –
+                    <span class="font-semibold">{{ Math.min(fiadoHistoryPage * fiadoHistoryPerPage, fiadoHistoryTotal) }}</span>
+                    de <span class="font-semibold">{{ fiadoHistoryTotal }}</span> registros
+                  </div>
+
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      :disabled="fiadoHistoryPage === 1"
+                      @click="goToPreviousFiadoHistoryPage"
+                      class="rounded border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+                    >
+                      ← Anterior
+                    </button>
+
+                    <div class="flex gap-1">
+                      <button
+                        v-for="page in fiadoHistoryPagesArray"
+                        :key="page"
+                        type="button"
+                        @click="goToFiadoHistoryPage(page)"
+                        :class="[
+                          'rounded px-2 py-1 text-sm font-medium transition',
+                          page === fiadoHistoryPage
+                            ? 'bg-primary text-white'
+                            : 'border border-gray-300 text-gray-700 hover:bg-gray-50',
+                        ]"
+                      >
+                        {{ page }}
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      :disabled="fiadoHistoryPage === fiadoHistoryTotalPages"
+                      @click="goToNextFiadoHistoryPage"
+                      class="rounded border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+                    >
+                      Próxima →
+                    </button>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            <aside class="h-fit rounded-lg border border-gray-200 bg-white p-4 xl:sticky xl:top-24">
+              <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-500">
+                Resumo do Período
+              </h3>
+
+              <div v-if="loadingFiadoHistory" class="mt-4 space-y-3">
+                <div class="h-14 animate-pulse rounded bg-gray-100"></div>
+                <div class="h-14 animate-pulse rounded bg-gray-100"></div>
+                <div class="h-14 animate-pulse rounded bg-gray-100"></div>
+              </div>
+
+              <div v-else class="mt-4 space-y-3">
+                <div class="rounded bg-gray-50 p-3">
+                  <p class="text-xs font-semibold uppercase text-gray-500">Fiado do Período</p>
+                  <p class="mt-1 text-lg font-bold text-gray-900">
+                    {{ formatCents(fiadoHistorySummary.fiado_period_cents) }}
+                  </p>
+                </div>
+
+                <div class="rounded bg-gray-50 p-3">
+                  <p class="text-xs font-semibold uppercase text-gray-500">Fiado em Aberto</p>
+                  <p class="mt-1 text-lg font-bold text-warning">
+                    {{ formatCents(fiadoHistorySummary.fiado_open_cents) }}
+                  </p>
+                </div>
+
+                <div class="rounded bg-gray-50 p-3">
+                  <p class="text-xs font-semibold uppercase text-gray-500">Fiado Pago no Período</p>
+                  <p class="mt-1 text-lg font-bold text-success">
+                    {{ formatCents(fiadoHistorySummary.fiado_paid_cents) }}
+                  </p>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <!-- ==================== ABA: Histórico de Pagamentos ==================== -->
+        <section v-if="activeTab === 'payment-history'" class="mt-6">
+          <div class="mb-6 flex flex-wrap items-end gap-4">
+            <div class="relative w-full max-w-md">
+              <label class="mb-1 block text-sm font-medium text-gray-700">Selecione o cliente</label>
+              <div class="flex gap-2">
+                <input
+                  v-model="historyCustomerSearchInput"
+                  type="text"
+                  placeholder="Buscar por nome ou telefone..."
+                  class="flex-1 rounded border border-gray-300 px-4 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  @focus="openHistoryCustomerDropdown"
+                  @input="openHistoryCustomerDropdown"
+                />
+                <button
+                  v-if="selectedHistoryCustomer"
+                  type="button"
+                  @click="clearSelectedHistoryCustomer"
+                  class="rounded bg-gray-200 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-300"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div
+                v-if="showHistoryCustomerDropdown && !selectedHistoryCustomer"
+                class="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg"
+              >
+                <div v-if="loadingHistoryCustomers" class="p-3 text-center text-sm text-gray-500">
+                  Carregando clientes...
+                </div>
+                <div v-else-if="historyCustomersError" class="p-3 text-sm text-danger">
+                  {{ historyCustomersError }}
+                </div>
+                <div v-else-if="filteredHistoryCustomers.length === 0" class="p-3 text-center text-sm text-gray-500">
+                  Nenhum cliente encontrado.
+                </div>
+                <button
+                  v-for="customer in filteredHistoryCustomers"
+                  :key="customer.id"
+                  type="button"
+                  class="flex w-full items-center justify-between border-b border-gray-100 px-4 py-3 text-left hover:bg-gray-50"
+                  @click="selectHistoryCustomer(customer)"
+                >
+                  <div>
+                    <span class="block text-sm font-medium text-gray-900">{{ customer.name }}</span>
+                    <span class="text-xs text-gray-500">
+                      {{ customer.phone ? formatPhoneForDisplay(customer.phone) : "Sem telefone" }}
+                    </span>
+                  </div>
+                  <span
+                    :class="[
+                      'text-xs font-semibold',
+                      customer.is_active ? 'text-green-700' : 'text-gray-500',
+                    ]"
+                  >
+                    {{ customer.is_active ? "Ativo" : "Inativo" }}
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <div class="flex items-end gap-3">
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Mês</label>
+                <select
+                  v-model.number="selectedHistoryMonth"
+                  class="rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option v-for="month in monthOptions" :key="month.value" :value="month.value">
+                    {{ month.label }}
+                  </option>
+                </select>
+              </div>
+
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">Ano</label>
+                <select
+                  v-model.number="selectedHistoryYear"
+                  class="rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option v-for="year in yearOptions" :key="year" :value="year">
+                    {{ year }}
+                  </option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div
+            v-if="!selectedHistoryCustomer"
+            class="rounded-lg border border-gray-200 bg-white p-6 text-center text-gray-600"
+          >
+            Selecione um cliente para visualizar o histórico de pagamentos de fiado.
+          </div>
+
+          <div v-else class="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+            <div>
+              <div v-if="loadingPaymentHistory" class="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
+                <div v-for="index in 6" :key="index" class="h-10 animate-pulse rounded bg-gray-100"></div>
+              </div>
+
+              <div
+                v-else-if="paymentHistoryError"
+                class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-danger"
+                role="alert"
+              >
+                <p>{{ paymentHistoryError }}</p>
+                <button
+                  type="button"
+                  @click="loadPaymentHistory"
+                  class="mt-3 rounded bg-primary px-3 py-1.5 text-white transition hover:bg-primary-dark"
+                >
+                  Tentar novamente
+                </button>
+              </div>
+
+              <div
+                v-else-if="paymentHistoryRows.length === 0"
+                class="rounded-lg border border-gray-200 bg-white p-6 text-center text-gray-600"
+              >
+                Nenhum pagamento de fiado encontrado para este cliente no período selecionado.
+              </div>
+
+              <template v-else>
+                <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+                  <table class="w-full min-w-[760px]">
+                    <thead class="bg-gray-50">
+                      <tr>
+                        <th class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Dia</th>
+                        <th class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Horário</th>
+                        <th class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Fiado em Aberto</th>
+                        <th class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Valor Pago</th>
+                        <th class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Tipo de Pagamento</th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200">
+                      <tr v-for="payment in paymentHistoryRows" :key="payment.id" class="hover:bg-gray-50">
+                        <td class="px-6 py-4 text-sm text-gray-900">{{ formatDateDay(payment.created_at) }}</td>
+                        <td class="px-6 py-4 text-sm text-gray-600">{{ formatTime(payment.created_at) }}</td>
+                        <td class="px-6 py-4 text-sm text-gray-900">
+                          {{ formatCents(getPaymentHistoryDebtBeforeCents(payment)) }}
+                        </td>
+                        <td class="px-6 py-4 text-sm font-medium text-gray-900">
+                          {{ formatCents(payment.amount_cents) }}
+                        </td>
+                        <td class="px-6 py-4 text-sm text-gray-600">{{ getPaymentHistoryTypeLabel(payment) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div
+                  v-if="paymentHistoryTotalPages > 1"
+                  class="mt-6 flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4"
+                >
+                  <div class="text-sm text-gray-600">
+                    Mostrando
+                    <span class="font-semibold">{{ (paymentHistoryPage - 1) * paymentHistoryPerPage + 1 }}</span>
+                    –
+                    <span class="font-semibold">{{ Math.min(paymentHistoryPage * paymentHistoryPerPage, paymentHistoryTotal) }}</span>
+                    de <span class="font-semibold">{{ paymentHistoryTotal }}</span> registros
+                  </div>
+
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      :disabled="paymentHistoryPage === 1"
+                      @click="goToPreviousPaymentHistoryPage"
+                      class="rounded border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+                    >
+                      ← Anterior
+                    </button>
+
+                    <div class="flex gap-1">
+                      <button
+                        v-for="page in paymentHistoryPagesArray"
+                        :key="page"
+                        type="button"
+                        @click="goToPaymentHistoryPage(page)"
+                        :class="[
+                          'rounded px-2 py-1 text-sm font-medium transition',
+                          page === paymentHistoryPage
+                            ? 'bg-primary text-white'
+                            : 'border border-gray-300 text-gray-700 hover:bg-gray-50',
+                        ]"
+                      >
+                        {{ page }}
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      :disabled="paymentHistoryPage === paymentHistoryTotalPages"
+                      @click="goToNextPaymentHistoryPage"
+                      class="rounded border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+                    >
+                      Próxima →
+                    </button>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            <aside class="h-fit rounded-lg border border-gray-200 bg-white p-4 xl:sticky xl:top-24">
+              <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-500">
+                Resumo do Período
+              </h3>
+
+              <div v-if="loadingPaymentHistory" class="mt-4 space-y-3">
+                <div class="h-14 animate-pulse rounded bg-gray-100"></div>
+                <div class="h-14 animate-pulse rounded bg-gray-100"></div>
+              </div>
+
+              <div v-else class="mt-4 space-y-3">
+                <div class="rounded bg-gray-50 p-3">
+                  <p class="text-xs font-semibold uppercase text-gray-500">Fiado Pago no Período</p>
+                  <p class="mt-1 text-lg font-bold text-success">
+                    {{ formatCents(paymentHistorySummary.total_paid_period_cents) }}
+                  </p>
+                </div>
+
+                <div class="rounded bg-gray-50 p-3">
+                  <p class="text-xs font-semibold uppercase text-gray-500">Fiado em Aberto</p>
+                  <p class="mt-1 text-lg font-bold text-warning">
+                    {{ formatCents(paymentHistorySummary.fiado_open_cents) }}
+                  </p>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <!-- ==================== MODAIS ==================== -->
+
+        <!-- Receipt Modal -->
+        <div
+          v-if="showReceiptModal && selectedReceiptSale"
+          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+          @click.self="closeReceiptModal"
+        >
+          <div class="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+            <div class="mb-4 flex items-center justify-between">
+              <h2 class="text-xl font-bold text-gray-900">Recibo da Compra</h2>
+              <button
+                type="button"
+                class="rounded-lg p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600"
+                aria-label="Fechar modal"
+                @click="closeReceiptModal"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="h-6 w-6"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div class="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-4 font-mono text-sm">
+              <div class="border-b border-dashed border-gray-400 pb-2 text-center font-bold">
+                PDV FIADODIGITAL
+              </div>
+
+              <div class="space-y-1 border-b border-dashed border-gray-400 pb-2">
+                <p>
+                  <span class="text-gray-600">Cliente:</span>
+                  <span class="ml-1 font-medium text-gray-900">{{ selectedHistoryCustomer?.name }}</span>
+                </p>
+                <p>
+                  <span class="text-gray-600">Data:</span>
+                  <span class="ml-1 font-medium text-gray-900">{{ formatDateTimeWithConnector(selectedReceiptSale.created_at) }}</span>
+                </p>
+                <p>
+                  <span class="text-gray-600">Terminal:</span>
+                  <span class="ml-1 font-medium text-gray-900">{{ selectedReceiptSale.terminal_id }}</span>
+                </p>
+              </div>
+
+              <div class="border-b border-dashed border-gray-400 pb-2">
+                <p class="mb-1 font-bold text-gray-800">ITENS DA COMPRA</p>
+                <div
+                  v-for="item in selectedReceiptSale.items"
+                  :key="item.id"
+                  class="mb-1"
+                >
+                  <div class="flex justify-between">
+                    <span class="text-gray-700">{{ item.quantity }}x {{ getReceiptItemName(item.product_name) }}</span>
+                    <span class="text-gray-900">{{ formatCents(item.total_cents) }}</span>
+                  </div>
+                  <div
+                    v-if="item.discount_cents > 0"
+                    class="mt-1 flex justify-between text-xs text-gray-500"
+                  >
+                    <span>Unitário: {{ formatCents(getUnitPriceFromItem(item)) }} | Desconto item: {{ formatCents(item.discount_cents) }}</span>
+                    <span></span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="space-y-1 border-b border-dashed border-gray-400 pb-2">
+                <div class="flex justify-between">
+                  <span class="text-gray-600">Subtotal:</span>
+                  <span class="text-gray-900">{{ formatCents(selectedReceiptSale.subtotal_cents) }}</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-gray-600">Desconto:</span>
+                  <span class="text-gray-900">{{ formatCents(selectedReceiptSale.discount_cents) }}</span>
+                </div>
+                <div class="flex justify-between font-bold">
+                  <span>Total:</span>
+                  <span>{{ formatCents(selectedReceiptSale.total_cents) }}</span>
+                </div>
+              </div>
+
+              <div>
+                <p class="mb-1 font-bold text-gray-800">PAGAMENTO</p>
+                <div
+                  v-for="(payment, paymentIndex) in selectedReceiptSale.payments"
+                  :key="paymentIndex"
+                  class="flex justify-between"
+                >
+                  <span class="text-gray-600">{{ getPaymentMethodLabel(payment.method) }}:</span>
+                  <span class="text-gray-900">{{ formatCents(payment.amount_cents) }}</span>
+                </div>
+                <div
+                  v-if="selectedReceiptSale.payments.length === 0"
+                  class="flex justify-between"
+                >
+                  <span class="text-gray-600">{{ getPaymentMethodLabel(selectedReceiptSale.payment_method) }}:</span>
+                  <span class="text-gray-900">{{ formatCents(selectedReceiptSale.total_cents) }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-4 flex justify-end gap-3">
+              <button
+                type="button"
+                class="rounded border border-gray-300 px-4 py-2 font-medium text-gray-700 transition hover:bg-gray-50"
+                @click="closeReceiptModal"
+              >
+                Fechar
+              </button>
+              <button
+                type="button"
+                class="rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark"
+                @click="printReceipt"
+              >
+                Imprimir
+              </button>
+            </div>
           </div>
         </div>
 

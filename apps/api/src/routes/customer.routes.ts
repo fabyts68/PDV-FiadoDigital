@@ -14,6 +14,16 @@ const controller = new CustomerController();
 customerRouter.use(authenticate);
 
 customerRouter.get("/", controller.list);
+customerRouter.get(
+  "/:id/fiado-history",
+  authorize("admin", "manager"),
+  controller.getFiadoHistory,
+);
+customerRouter.get(
+  "/:id/payment-history",
+  authorize("admin", "manager"),
+  controller.getPaymentHistory,
+);
 customerRouter.get("/:id", controller.getById);
 customerRouter.post(
   "/",

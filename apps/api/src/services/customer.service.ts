@@ -1,6 +1,10 @@
 import { prisma } from "../config/database.js";
 import bcrypt from "bcryptjs";
-import { CustomerRepository, type FindAllOptions } from "../repositories/customer.repository.js";
+import {
+  CustomerRepository,
+  type FindAllOptions,
+  type PeriodFilter,
+} from "../repositories/customer.repository.js";
 import type { CreateCustomerPayload } from "@pdv/shared";
 
 const customerRepository = new CustomerRepository();
@@ -18,6 +22,26 @@ export class CustomerService {
     }
 
     return customer;
+  }
+
+  async getFiadoHistory(customerId: string, page = 1, perPage = 10, filter?: PeriodFilter) {
+    const customer = await customerRepository.findById(customerId);
+
+    if (!customer) {
+      throw new Error("Cliente não encontrado");
+    }
+
+    return customerRepository.findFiadoHistoryByCustomerId(customerId, page, perPage, filter);
+  }
+
+  async getPaymentHistory(customerId: string, page = 1, perPage = 10, filter?: PeriodFilter) {
+    const customer = await customerRepository.findById(customerId);
+
+    if (!customer) {
+      throw new Error("Cliente não encontrado");
+    }
+
+    return customerRepository.findPaymentHistoryByCustomerId(customerId, page, perPage, filter);
   }
 
   async create(payload: CreateCustomerPayload) {
@@ -110,7 +134,9 @@ export class CustomerService {
         );
       }
 
-      const newDebt = customer.current_debt_cents - amountCents;
+      const debtBeforeCents = customer.current_debt_cents;
+      const paymentKind = amountCents === debtBeforeCents ? "full" : "partial";
+      const newDebt = debtBeforeCents - amountCents;
 
       const operatorOpenCashRegister = await tx.cashRegister.findFirst({
         where: {
@@ -146,9 +172,14 @@ export class CustomerService {
         data: {
           type: "fiado_payment",
           amount_cents: amountCents,
+          customer_id: customer.id,
           operator_id: operatorId,
           cash_register_id: fallbackOpenCashRegister.id,
-          description: `Pagamento de fiado - Cliente: ${customer.name}`,
+          debt_before_cents: debtBeforeCents,
+          description: JSON.stringify({
+            debt_before: debtBeforeCents,
+            type: paymentKind,
+          }),
         },
       });
 

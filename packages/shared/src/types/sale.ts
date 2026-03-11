@@ -27,6 +27,10 @@ export type Sale = {
   updated_at: string;
 };
 
+export type SaleWithPayments = Sale & {
+  payments: SalePayment[];
+};
+
 export type SaleStatus = "pending" | "completed" | "cancelled" | "refunded";
 
 export type SalePayment = {

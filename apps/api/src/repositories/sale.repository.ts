@@ -7,7 +7,7 @@ export class SaleRepository {
   async findAll() {
     return prisma.sale.findMany({
       where: { deleted_at: null },
-      include: { items: true },
+      include: { items: true, payments: true },
       orderBy: { created_at: "desc" },
     });
   }
@@ -15,14 +15,14 @@ export class SaleRepository {
   async findById(id: string) {
     return prisma.sale.findFirst({
       where: { id, deleted_at: null },
-      include: { items: true },
+      include: { items: true, payments: true },
     });
   }
 
   async findByUuid(uuid: string) {
     return prisma.sale.findFirst({
       where: { uuid },
-      include: { items: true },
+      include: { items: true, payments: true },
     });
   }
 
@@ -39,6 +39,8 @@ export class SaleRepository {
       this.ensureCustomerCanBeLinkedToSale(customer);
       this.ensureFiadoBusinessRules(customer, totalCents, payload.payment_method);
 
+      const productNamesById = await this.buildProductNameMap(tx, payload.items);
+
       // 1. Criar a venda e os itens
       const sale = await tx.sale.create({
         data: {
@@ -54,6 +56,7 @@ export class SaleRepository {
           items: {
             create: payload.items.map((item) => ({
               product_id: item.product_id,
+              product_name: productNamesById.get(item.product_id) || "Produto sem nome",
               quantity: item.quantity,
               unit_price_cents: item.unit_price_cents,
               discount_cents: item.discount_cents,
@@ -61,8 +64,14 @@ export class SaleRepository {
                 item.unit_price_cents * item.quantity - item.discount_cents,
             })),
           },
+          payments: {
+            create: payload.payments.map((payment) => ({
+              method: payment.method,
+              amount_cents: payment.amount_cents,
+            })),
+          },
         },
-        include: { items: true },
+        include: { items: true, payments: true },
       });
 
       // 2. Validar e decrementar estoque de cada produto vendido
@@ -132,6 +141,24 @@ export class SaleRepository {
       // Retornar venda com informações de estoque baixo
       return { sale, lowStockProducts };
     });
+  }
+
+  private async buildProductNameMap(
+    tx: Prisma.TransactionClient,
+    items: CreateSalePayload["items"],
+  ): Promise<Map<string, string>> {
+    const uniqueProductIds = Array.from(new Set(items.map((item) => item.product_id)));
+
+    if (uniqueProductIds.length === 0) {
+      return new Map();
+    }
+
+    const products = await tx.product.findMany({
+      where: { id: { in: uniqueProductIds } },
+      select: { id: true, name: true },
+    });
+
+    return new Map(products.map((product) => [product.id, product.name]));
   }
 
   private async findCustomerForSale(

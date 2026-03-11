@@ -1,4 +1,6 @@
 import { prisma } from "../config/database.js";
+import type { SaleWithPayments, SalePayment, Transaction } from "@pdv/shared";
+import { PAYMENT_METHODS } from "@pdv/shared";
 
 const DEFAULT_PER_PAGE = 10;
 const MAX_PER_PAGE = 100;
@@ -19,6 +21,41 @@ export interface PaginatedResult<T> {
     per_page: number;
     total: number;
     total_pages: number;
+  };
+}
+
+export interface PeriodFilter {
+  month?: number;
+  year?: number;
+}
+
+export interface FiadoHistorySummary {
+  fiado_period_cents: number;
+  fiado_open_cents: number;
+  fiado_paid_cents: number;
+}
+
+export interface PaymentHistorySummary {
+  total_paid_period_cents: number;
+  fiado_open_cents: number;
+}
+
+export interface FiadoHistoryResult extends PaginatedResult<SaleWithPayments> {
+  summary: FiadoHistorySummary;
+}
+
+export interface PaymentHistoryResult extends PaginatedResult<Transaction> {
+  summary: PaymentHistorySummary;
+}
+
+function buildCreatedAtRange(filter?: PeriodFilter): { gte: Date; lt: Date } | undefined {
+  if (!filter?.month || !filter?.year) {
+    return undefined;
+  }
+
+  return {
+    gte: new Date(filter.year, filter.month - 1, 1),
+    lt: new Date(filter.year, filter.month, 1),
   };
 }
 
@@ -78,6 +115,202 @@ export class CustomerRepository {
     return prisma.customer.findFirst({
       where: { id, deleted_at: null },
     });
+  }
+
+  async findFiadoHistoryByCustomerId(
+    id: string,
+    page = 1,
+    perPage = DEFAULT_PER_PAGE,
+    filter?: PeriodFilter,
+  ): Promise<FiadoHistoryResult> {
+    const validPerPage = Math.min(Math.max(perPage || DEFAULT_PER_PAGE, 1), MAX_PER_PAGE);
+    const validPage = Math.max(page || 1, 1);
+    const createdAtRange = buildCreatedAtRange(filter);
+
+    const where = {
+      customer_id: id,
+      deleted_at: null,
+      status: { in: ["completed", "refunded"] },
+      ...(createdAtRange ? { created_at: createdAtRange } : {}),
+      OR: [
+        { payment_method: PAYMENT_METHODS.FIADO },
+        {
+          payment_method: PAYMENT_METHODS.MIXED,
+          payments: { some: { method: PAYMENT_METHODS.FIADO } },
+        },
+      ],
+    };
+
+    const [total, sales] = await Promise.all([
+      prisma.sale.count({ where }),
+      prisma.sale.findMany({
+        where,
+        include: {
+          items: {
+            select: {
+              id: true,
+              sale_id: true,
+              product_id: true,
+              product_name: true,
+              quantity: true,
+              unit_price_cents: true,
+              discount_cents: true,
+              total_cents: true,
+            },
+          },
+          payments: true,
+        },
+        orderBy: { created_at: "desc" },
+        skip: (validPage - 1) * validPerPage,
+        take: validPerPage,
+      }),
+    ]);
+
+    const [fiadoDirectSalesAggregate, fiadoMixedPaymentsAggregate, fiadoPaidAggregate, customer] = await Promise.all([
+      prisma.sale.aggregate({
+        where: {
+          customer_id: id,
+          deleted_at: null,
+          status: { in: ["completed", "refunded"] },
+          payment_method: PAYMENT_METHODS.FIADO,
+          ...(createdAtRange ? { created_at: createdAtRange } : {}),
+        },
+        _sum: { total_cents: true },
+      }),
+      prisma.salePayment.aggregate({
+        where: {
+          method: PAYMENT_METHODS.FIADO,
+          sale: {
+            customer_id: id,
+            deleted_at: null,
+            status: { in: ["completed", "refunded"] },
+            payment_method: PAYMENT_METHODS.MIXED,
+            ...(createdAtRange ? { created_at: createdAtRange } : {}),
+          },
+        },
+        _sum: { amount_cents: true },
+      }),
+      prisma.transaction.aggregate({
+        where: {
+          type: "fiado_payment",
+          customer_id: id,
+          ...(createdAtRange ? { created_at: createdAtRange } : {}),
+        },
+        _sum: { amount_cents: true },
+      }),
+      prisma.customer.findUnique({
+        where: { id },
+        select: { current_debt_cents: true },
+      }),
+    ]);
+
+    const data: SaleWithPayments[] = sales.map((sale) => {
+      const payments: SalePayment[] = sale.payments.map((payment) => ({
+        method: payment.method as SalePayment["method"],
+        amount_cents: payment.amount_cents,
+      }));
+
+      return {
+        id: sale.id,
+        uuid: sale.uuid,
+        operator_id: sale.operator_id,
+        customer_id: sale.customer_id,
+        terminal_id: sale.terminal_id,
+        payment_method: sale.payment_method as SaleWithPayments["payment_method"],
+        subtotal_cents: sale.subtotal_cents,
+        discount_cents: sale.discount_cents,
+        total_cents: sale.total_cents,
+        status: sale.status as SaleWithPayments["status"],
+        items: sale.items,
+        created_at: sale.created_at.toISOString(),
+        updated_at: sale.updated_at.toISOString(),
+        payments,
+      };
+    });
+
+    const totalPages = Math.ceil(total / validPerPage);
+    const fiadoPeriodCents =
+      (fiadoDirectSalesAggregate._sum.total_cents ?? 0) +
+      (fiadoMixedPaymentsAggregate._sum.amount_cents ?? 0);
+
+    return {
+      data,
+      pagination: {
+        page: validPage,
+        per_page: validPerPage,
+        total,
+        total_pages: totalPages,
+      },
+      summary: {
+        fiado_period_cents: fiadoPeriodCents,
+        fiado_open_cents: customer?.current_debt_cents ?? 0,
+        fiado_paid_cents: fiadoPaidAggregate._sum.amount_cents ?? 0,
+      },
+    };
+  }
+
+  async findPaymentHistoryByCustomerId(
+    id: string,
+    page = 1,
+    perPage = DEFAULT_PER_PAGE,
+    filter?: PeriodFilter,
+  ): Promise<PaymentHistoryResult> {
+    const validPerPage = Math.min(Math.max(perPage || DEFAULT_PER_PAGE, 1), MAX_PER_PAGE);
+    const validPage = Math.max(page || 1, 1);
+    const createdAtRange = buildCreatedAtRange(filter);
+
+    const where = {
+      type: "fiado_payment",
+      customer_id: id,
+      ...(createdAtRange ? { created_at: createdAtRange } : {}),
+    };
+
+    const [total, transactions, totalPaidAggregate, customer] = await Promise.all([
+      prisma.transaction.count({ where }),
+      prisma.transaction.findMany({
+        where,
+        orderBy: { created_at: "desc" },
+        skip: (validPage - 1) * validPerPage,
+        take: validPerPage,
+      }),
+      prisma.transaction.aggregate({
+        where,
+        _sum: { amount_cents: true },
+      }),
+      prisma.customer.findUnique({
+        where: { id },
+        select: { current_debt_cents: true },
+      }),
+    ]);
+
+    const data: Transaction[] = transactions.map((transaction) => ({
+      id: transaction.id,
+      type: transaction.type as Transaction["type"],
+      amount_cents: transaction.amount_cents,
+      sale_id: transaction.sale_id,
+      customer_id: transaction.customer_id,
+      cash_register_id: transaction.cash_register_id,
+      operator_id: transaction.operator_id,
+      debt_before_cents: transaction.debt_before_cents,
+      description: transaction.description,
+      created_at: transaction.created_at.toISOString(),
+    }));
+
+    const totalPages = Math.ceil(total / validPerPage);
+
+    return {
+      data,
+      pagination: {
+        page: validPage,
+        per_page: validPerPage,
+        total,
+        total_pages: totalPages,
+      },
+      summary: {
+        total_paid_period_cents: totalPaidAggregate._sum.amount_cents ?? 0,
+        fiado_open_cents: customer?.current_debt_cents ?? 0,
+      },
+    };
   }
 
   async create(data: {

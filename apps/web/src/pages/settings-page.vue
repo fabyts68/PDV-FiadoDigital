@@ -278,7 +278,7 @@ function isValidCnpj(value: string): boolean {
   const calculateDigit = (base: string, factors: number[]): number => {
     const total = base
       .split("")
-      .reduce((sum, digit, index) => sum + Number(digit) * factors[index], 0);
+      .reduce((sum, digit, index) => sum + Number(digit) * (factors[index] ?? 0), 0);
     const remainder = total % 11;
     return remainder < 2 ? 0 : 11 - remainder;
   };

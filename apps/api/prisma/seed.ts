@@ -28,9 +28,43 @@ async function main(): Promise<void> {
     },
   });
 
+  const saleItemsWithoutName = await prisma.saleItem.findMany({
+    where: {
+      OR: [
+        { product_name: "" },
+        { product_name: "Produto sem nome" },
+      ],
+    },
+    select: {
+      id: true,
+      product: {
+        select: {
+          name: true,
+        },
+      },
+    },
+  });
+
+  for (const saleItem of saleItemsWithoutName) {
+    const productName = saleItem.product.name.trim();
+
+    if (!productName) {
+      continue;
+    }
+
+    await prisma.saleItem.update({
+      where: { id: saleItem.id },
+      data: { product_name: productName },
+    });
+  }
+
   console.log("[SEED] Usuario admin garantido com sucesso.");
   console.log("[SEED] Login: admin | Senha: admin123");
   console.log("[SEED] PIN temporario para testes: 123456");
+
+  if (saleItemsWithoutName.length > 0) {
+    console.log(`[SEED] Snapshot de nome preenchido em ${saleItemsWithoutName.length} itens de venda.`);
+  }
 }
 
 main()

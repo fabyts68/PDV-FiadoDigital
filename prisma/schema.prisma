@@ -55,7 +55,8 @@ model Customer {
   updated_at        DateTime  @updatedAt
   deleted_at        DateTime?
 
-  sales Sale[]
+  sales        Sale[]
+  transactions Transaction[]
 
   @@index([name])
   @@map("customer")
@@ -141,6 +142,7 @@ model Sale {
   operator     User       @relation(fields: [operator_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
   customer     Customer?  @relation(fields: [customer_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
   items        SaleItem[]
+  payments     SalePayment[]
   transactions Transaction[]
 
   @@index([uuid])
@@ -151,6 +153,20 @@ model Sale {
   @@map("sale")
 }
 
+model SalePayment {
+  id          String   @id @default(uuid())
+  sale_id     String
+  method      String   // cash | pix | credit_card | debit_card | fiado
+  amount_cents Int
+  created_at  DateTime @default(now())
+
+  sale Sale @relation(fields: [sale_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([sale_id])
+  @@index([method])
+  @@map("sale_payment")
+}
+
 // ------------------------------------------
 // SaleItem — Itens da venda (snapshot de preço)
 // ------------------------------------------
@@ -158,6 +174,7 @@ model SaleItem {
   id               String @id @default(uuid())
   sale_id          String
   product_id       String
+  product_name     String @default("Produto sem nome")
   quantity         Int
   unit_price_cents Int    // Snapshot do preço no ato da venda
   discount_cents   Int    @default(0)
@@ -203,16 +220,20 @@ model Transaction {
   type             String   // sale | refund | cancellation | cash_in | cash_out | fiado_payment
   amount_cents     Int
   sale_id          String?
+  customer_id      String?
   cash_register_id String
   operator_id      String
+  debt_before_cents Int?
   description      String?
   created_at       DateTime @default(now())
 
   sale          Sale?        @relation(fields: [sale_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  customer      Customer?    @relation(fields: [customer_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
   cash_register CashRegister @relation(fields: [cash_register_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
   @@index([type])
   @@index([sale_id])
+  @@index([customer_id])
   @@index([cash_register_id])
   @@index([created_at])
   @@map("transaction")

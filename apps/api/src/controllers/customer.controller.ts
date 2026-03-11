@@ -3,6 +3,20 @@ import { CustomerService } from "../services/customer.service.js";
 
 const customerService = new CustomerService();
 
+function parsePositiveQueryNumber(rawValue: unknown): number | undefined {
+  if (typeof rawValue !== "string") {
+    return undefined;
+  }
+
+  const parsed = Number.parseInt(rawValue, 10);
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return undefined;
+  }
+
+  return parsed;
+}
+
 export class CustomerController {
   async list(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
@@ -36,6 +50,49 @@ export class CustomerController {
     try {
       const customer = await customerService.getById(req.params.id as string);
       res.json({ success: true, data: customer });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getFiadoHistory(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const customerId = req.params.id as string;
+      const page = parsePositiveQueryNumber(req.query.page) ?? 1;
+      const perPage = parsePositiveQueryNumber(req.query.per_page) ?? 10;
+      const month = parsePositiveQueryNumber(req.query.month);
+      const year = parsePositiveQueryNumber(req.query.year);
+
+      const validMonth = month && month >= 1 && month <= 12 ? month : undefined;
+      const validYear = year && year >= 2000 && year <= 9999 ? year : undefined;
+
+      const result = await customerService.getFiadoHistory(customerId, page, perPage, {
+        month: validMonth,
+        year: validYear,
+      });
+      res.json({ success: true, data: result.data, pagination: result.pagination, summary: result.summary });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getPaymentHistory(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const customerId = req.params.id as string;
+      const page = parsePositiveQueryNumber(req.query.page) ?? 1;
+      const perPage = parsePositiveQueryNumber(req.query.per_page) ?? 10;
+      const month = parsePositiveQueryNumber(req.query.month);
+      const year = parsePositiveQueryNumber(req.query.year);
+
+      const validMonth = month && month >= 1 && month <= 12 ? month : undefined;
+      const validYear = year && year >= 2000 && year <= 9999 ? year : undefined;
+
+      const result = await customerService.getPaymentHistory(customerId, page, perPage, {
+        month: validMonth,
+        year: validYear,
+      });
+
+      res.json({ success: true, data: result.data, pagination: result.pagination, summary: result.summary });
     } catch (error) {
       next(error);
     }
