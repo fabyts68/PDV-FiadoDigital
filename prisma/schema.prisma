@@ -77,6 +77,7 @@ model Product {
   profit_margin   Float?
   price_cents     Int
   cost_price_cents Int
+  average_cost_cents Int    @default(0)
   stock_quantity  Float     @default(0)
   min_stock_alert Int       @default(5)
   is_bulk         Boolean   @default(false)
@@ -88,12 +89,29 @@ model Product {
   brand       Brand?       @relation(fields: [brand_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
   product_type ProductType? @relation(fields: [product_type_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
   sale_items SaleItem[]
+  stock_movements StockMovement[]
 
   @@index([barcode])
   @@index([name])
   @@index([brand_id])
   @@index([product_type_id])
   @@map("product")
+}
+
+model StockMovement {
+  id              String   @id @default(uuid())
+  product_id      String
+  product         Product  @relation(fields: [product_id], references: [id])
+  type            String   // entry | sale | adjustment
+  quantity        Float    // positivo para entrada, negativo para saída
+  unit_cost_cents Int      @default(0)
+  description     String?
+  operator_id     String
+  created_at      DateTime @default(now())
+
+  @@index([product_id])
+  @@index([created_at])
+  @@map("stock_movements")
 }
 
 model Brand {

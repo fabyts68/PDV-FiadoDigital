@@ -2,15 +2,23 @@ import { ProductRepository } from "../repositories/product.repository.js";
 import type { CreateProductPayload, UpdateProductPayload } from "@pdv/shared";
 import { ProductTypeRepository } from "../repositories/product-type.repository.js";
 import { BrandRepository } from "../repositories/brand.repository.js";
+import { StockMovementRepository } from "../repositories/stock-movement.repository.js";
 
 const productRepository = new ProductRepository();
 const productTypeRepository = new ProductTypeRepository();
 const brandRepository = new BrandRepository();
+const stockMovementRepository = new StockMovementRepository();
 
 type BulkPricePayload = {
   product_type_id: string;
   brand_id?: string;
   profit_margin_percentage: number;
+};
+
+type UpdateProductWithStockPayload = UpdateProductPayload & {
+  stock_entry_quantity?: number;
+  stock_entry_unit_cost_cents?: number;
+  stock_entry_description?: string;
 };
 
 export class ProductService {
@@ -70,11 +78,12 @@ export class ProductService {
     return productRepository.create({
       ...payload,
       price_cents: resolvedPriceCents,
+      average_cost_cents: payload.average_cost_cents ?? payload.cost_price_cents,
       is_bulk: payload.is_bulk ?? false,
     });
   }
 
-  async update(id: string, payload: UpdateProductPayload) {
+  async update(id: string, payload: UpdateProductWithStockPayload, operatorId?: string) {
     if (payload.barcode) {
       const existingByBarcode = await productRepository.findByBarcode(payload.barcode);
 
@@ -123,10 +132,47 @@ export class ProductService {
       currentProduct.price_cents,
     );
 
-    return productRepository.update(id, {
+    const entryQuantityFromStock = this.resolveEntryQuantityFromStockDelta(
+      currentProduct.stock_quantity,
+      payload.stock_quantity,
+    );
+    const entryQuantity = payload.stock_entry_quantity ?? entryQuantityFromStock;
+
+    const entryUnitCostCents =
+      payload.stock_entry_unit_cost_cents ??
+      payload.cost_price_cents ??
+      currentProduct.average_cost_cents ??
+      currentProduct.cost_price_cents;
+
+    const resolvedEntryUnitCostCents = entryUnitCostCents > 0
+      ? entryUnitCostCents
+      : currentProduct.cost_price_cents;
+
+    const nextAverageCostCents = this.resolveAverageCostAfterEntry({
+      currentStock: currentProduct.stock_quantity,
+      currentAverageCostCents: currentProduct.average_cost_cents,
+      entryQuantity,
+      entryUnitCostCents: resolvedEntryUnitCostCents,
+    });
+
+    const updatedProduct = await productRepository.update(id, {
       ...payload,
       price_cents: resolvedPriceCents,
+      average_cost_cents: nextAverageCostCents,
     });
+
+    if (entryQuantity > 0 && operatorId) {
+      await stockMovementRepository.create({
+        product_id: id,
+        type: "entry",
+        quantity: entryQuantity,
+        unit_cost_cents: resolvedEntryUnitCostCents,
+        description: payload.stock_entry_description ?? "Entrada de estoque",
+        operator_id: operatorId,
+      });
+    }
+
+    return updatedProduct;
   }
 
   async bulkUpdatePrice(payload: BulkPricePayload) {
@@ -183,5 +229,42 @@ export class ProductService {
     }
 
     return fallbackPriceCents;
+  }
+
+  private resolveEntryQuantityFromStockDelta(currentStock: number, nextStock?: number): number {
+    if (typeof nextStock !== "number") {
+      return 0;
+    }
+
+    const delta = nextStock - currentStock;
+
+    if (delta <= 0) {
+      return 0;
+    }
+
+    return delta;
+  }
+
+  private resolveAverageCostAfterEntry(input: {
+    currentStock: number;
+    currentAverageCostCents: number;
+    entryQuantity: number;
+    entryUnitCostCents: number;
+  }): number {
+    if (!Number.isFinite(input.entryQuantity) || input.entryQuantity <= 0) {
+      return input.currentAverageCostCents;
+    }
+
+    const denominator = input.currentStock + input.entryQuantity;
+
+    if (denominator <= 0) {
+      return 0;
+    }
+
+    const weightedTotal =
+      input.currentStock * input.currentAverageCostCents +
+      input.entryQuantity * input.entryUnitCostCents;
+
+    return Math.round(weightedTotal / denominator);
   }
 }

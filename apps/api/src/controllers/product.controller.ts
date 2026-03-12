@@ -47,7 +47,11 @@ export class ProductController {
     next: NextFunction,
   ): Promise<void> {
     try {
-      const product = await productService.update(req.params.id as string, req.body);
+      const product = await productService.update(
+        req.params.id as string,
+        req.body,
+        req.user?.sub,
+      );
       res.json({ success: true, data: product });
     } catch (error) {
       next(error);

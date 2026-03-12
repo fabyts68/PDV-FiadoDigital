@@ -87,6 +87,7 @@ export class SaleRepository {
             is_bulk: true,
             stock_quantity: true,
             min_stock_alert: true,
+            average_cost_cents: true,
           },
         });
 
@@ -116,6 +117,17 @@ export class SaleRepository {
         await tx.product.update({
           where: { id: item.product_id },
           data: { stock_quantity: newStockQuantity },
+        });
+
+        await tx.stockMovement.create({
+          data: {
+            product_id: item.product_id,
+            type: "sale",
+            quantity: -requiredQuantity,
+            unit_cost_cents: product.average_cost_cents,
+            description: `Venda ${sale.id}`,
+            operator_id: payload.operator_id,
+          },
         });
 
         // Verificar se o estoque ficou abaixo do mínimo

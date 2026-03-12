@@ -15,6 +15,7 @@ export type Product = {
   profit_margin: number | null;
   price_cents: number;
   cost_price_cents: number;
+  average_cost_cents: number;
   stock_quantity: number;
   min_stock_alert: number;
   is_bulk: boolean;
@@ -36,6 +37,7 @@ export type CreateProductPayload = {
   profit_margin?: number;
   price_cents?: number;
   cost_price_cents: number;
+  average_cost_cents?: number;
   stock_quantity: number;
   min_stock_alert: number;
   is_bulk?: boolean;

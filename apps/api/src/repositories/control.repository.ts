@@ -1,0 +1,355 @@
+import { PAYMENT_METHODS } from "@pdv/shared";
+import { prisma } from "../config/database.js";
+
+type SortDirection = "asc" | "desc";
+
+type StockSortKey = "name" | "type" | "brand" | "stock" | "average_cost" | "stock_value";
+
+function toRange(startDate?: string, endDate?: string): { gte?: Date; lte?: Date } | undefined {
+  if (!startDate && !endDate) {
+    return undefined;
+  }
+
+  const range: { gte?: Date; lte?: Date } = {};
+
+  if (startDate) {
+    range.gte = new Date(startDate);
+  }
+
+  if (endDate) {
+    range.lte = new Date(endDate);
+  }
+
+  return range;
+}
+
+function hasCashPayment(sale: {
+  payment_method: string;
+  payments: Array<{ method: string }>;
+}): boolean {
+  if (sale.payment_method === PAYMENT_METHODS.CASH) {
+    return true;
+  }
+
+  return sale.payments.some((payment) => payment.method === PAYMENT_METHODS.CASH);
+}
+
+export class ControlRepository {
+  async getStockSummary(options?: {
+    product_type_id?: string;
+    brand_id?: string;
+    page?: number;
+    per_page?: number;
+    sort_by?: StockSortKey;
+    sort_order?: SortDirection;
+  }) {
+    const page = Math.max(options?.page ?? 1, 1);
+    const perPage = Math.min(Math.max(options?.per_page ?? 10, 1), 100);
+    const sortBy = options?.sort_by ?? "name";
+    const sortOrder: SortDirection = options?.sort_order ?? "asc";
+
+    const products = await prisma.product.findMany({
+      where: {
+        deleted_at: null,
+        ...(options?.product_type_id ? { product_type_id: options.product_type_id } : {}),
+        ...(options?.brand_id ? { brand_id: options.brand_id } : {}),
+      },
+      include: {
+        product_type: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        brand: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    const rows = products.map((product) => {
+      const effectiveAverageCostCents = product.average_cost_cents > 0
+        ? product.average_cost_cents
+        : product.cost_price_cents;
+      const stockValueCents = Math.round(product.stock_quantity * effectiveAverageCostCents);
+
+      return {
+        ...product,
+        average_cost_cents: effectiveAverageCostCents,
+        stock_value_cents: stockValueCents,
+        low_stock: product.stock_quantity <= product.min_stock_alert,
+      };
+    });
+
+    const sorted = [...rows].sort((left, right) => {
+      const direction = sortOrder === "asc" ? 1 : -1;
+
+      if (sortBy === "name") {
+        return direction * left.name.localeCompare(right.name, "pt-BR");
+      }
+
+      if (sortBy === "type") {
+        return direction * (left.product_type?.name ?? "").localeCompare(right.product_type?.name ?? "", "pt-BR");
+      }
+
+      if (sortBy === "brand") {
+        return direction * (left.brand?.name ?? "").localeCompare(right.brand?.name ?? "", "pt-BR");
+      }
+
+      if (sortBy === "stock") {
+        return direction * (left.stock_quantity - right.stock_quantity);
+      }
+
+      if (sortBy === "average_cost") {
+        return direction * (left.average_cost_cents - right.average_cost_cents);
+      }
+
+      return direction * (left.stock_value_cents - right.stock_value_cents);
+    });
+
+    const total = sorted.length;
+    const totalPages = Math.ceil(total / perPage);
+    const start = (page - 1) * perPage;
+    const data = sorted.slice(start, start + perPage);
+
+    const totalItemsQuantity = rows
+      .filter((item) => !item.is_bulk)
+      .reduce((acc, item) => acc + Math.trunc(item.stock_quantity), 0);
+
+    const totalBulkQuantity = rows
+      .filter((item) => item.is_bulk)
+      .reduce((acc, item) => acc + item.stock_quantity, 0);
+
+    const bulkByTypeMap = new Map<string, number>();
+
+    for (const row of rows) {
+      if (!row.is_bulk) {
+        continue;
+      }
+
+      const typeName = row.product_type?.name ?? "Sem tipo";
+      const current = bulkByTypeMap.get(typeName) ?? 0;
+      bulkByTypeMap.set(typeName, current + row.stock_quantity);
+    }
+
+    const bulkByType = [...bulkByTypeMap.entries()]
+      .map(([typeName, totalKg]) => ({ type_name: typeName, total_kg: totalKg }))
+      .sort((left, right) => left.type_name.localeCompare(right.type_name, "pt-BR"));
+
+    const totalStockValueCents = rows.reduce((acc, item) => acc + item.stock_value_cents, 0);
+
+    const weightedBase = rows.reduce((acc, item) => acc + item.stock_quantity * item.average_cost_cents, 0);
+    const weightedStock = rows.reduce((acc, item) => acc + item.stock_quantity, 0);
+    const weightedAverageCostCents = weightedStock > 0 ? Math.round(weightedBase / weightedStock) : 0;
+
+    return {
+      data,
+      pagination: {
+        page,
+        per_page: perPage,
+        total,
+        total_pages: totalPages,
+      },
+      summary: {
+        total_items_quantity: totalItemsQuantity,
+        total_bulk_quantity: totalBulkQuantity,
+        bulk_by_type: bulkByType,
+        total_stock_value_cents: totalStockValueCents,
+        weighted_avg_cost_cents: weightedAverageCostCents,
+        weighted_average_cost_cents: weightedAverageCostCents,
+      },
+    };
+  }
+
+  async getCashSummary(startDate?: string, endDate?: string) {
+    const createdAt = toRange(startDate, endDate);
+
+    const sales = await prisma.sale.findMany({
+      where: {
+        deleted_at: null,
+        status: "completed",
+        ...(createdAt ? { created_at: createdAt } : {}),
+      },
+      select: {
+        id: true,
+        payment_method: true,
+        total_cents: true,
+        discount_cents: true,
+        payments: {
+          select: {
+            method: true,
+            amount_cents: true,
+          },
+        },
+      },
+    });
+
+    const totals = {
+      cash_cents: 0,
+      credit_card_cents: 0,
+      debit_card_cents: 0,
+      pix_cents: 0,
+      fiado_cents: 0,
+      total_cents: 0,
+    };
+
+    for (const sale of sales) {
+      if (sale.payments.length > 0) {
+        for (const payment of sale.payments) {
+          if (payment.method === PAYMENT_METHODS.CASH) {
+            totals.cash_cents += payment.amount_cents;
+          }
+
+          if (payment.method === PAYMENT_METHODS.CREDIT_CARD) {
+            totals.credit_card_cents += payment.amount_cents;
+          }
+
+          if (payment.method === PAYMENT_METHODS.DEBIT_CARD) {
+            totals.debit_card_cents += payment.amount_cents;
+          }
+
+          if (payment.method === PAYMENT_METHODS.PIX) {
+            totals.pix_cents += payment.amount_cents;
+          }
+
+          if (payment.method === PAYMENT_METHODS.FIADO) {
+            totals.fiado_cents += payment.amount_cents;
+          }
+        }
+      } else {
+        if (sale.payment_method === PAYMENT_METHODS.CASH) {
+          totals.cash_cents += sale.total_cents;
+        }
+
+        if (sale.payment_method === PAYMENT_METHODS.CREDIT_CARD) {
+          totals.credit_card_cents += sale.total_cents;
+        }
+
+        if (sale.payment_method === PAYMENT_METHODS.DEBIT_CARD) {
+          totals.debit_card_cents += sale.total_cents;
+        }
+
+        if (sale.payment_method === PAYMENT_METHODS.PIX) {
+          totals.pix_cents += sale.total_cents;
+        }
+
+        if (sale.payment_method === PAYMENT_METHODS.FIADO) {
+          totals.fiado_cents += sale.total_cents;
+        }
+      }
+
+      if (hasCashPayment(sale)) {
+        totals.cash_cents -= sale.discount_cents;
+      }
+    }
+
+    if (totals.cash_cents < 0) {
+      totals.cash_cents = 0;
+    }
+
+    totals.total_cents =
+      totals.cash_cents +
+      totals.credit_card_cents +
+      totals.debit_card_cents +
+      totals.pix_cents +
+      totals.fiado_cents;
+
+    return totals;
+  }
+
+  async getDiscountSummary(startDate?: string, endDate?: string) {
+    const createdAt = toRange(startDate, endDate);
+
+    const sales = await prisma.sale.findMany({
+      where: {
+        deleted_at: null,
+        status: "completed",
+        discount_cents: { gt: 0 },
+        ...(createdAt ? { created_at: createdAt } : {}),
+      },
+      select: {
+        discount_cents: true,
+        payment_method: true,
+        payments: {
+          select: {
+            method: true,
+          },
+        },
+      },
+    });
+
+    const applicableSales = sales.filter((sale) => hasCashPayment(sale));
+
+    return {
+      total_discount_cents: applicableSales.reduce((acc, sale) => acc + sale.discount_cents, 0),
+      occurrences: applicableSales.length,
+    };
+  }
+
+  async getCancellations(startDate?: string, endDate?: string, limit = 50) {
+    const createdAt = toRange(startDate, endDate);
+
+    const [rows, groupedToday] = await Promise.all([
+      prisma.sale.findMany({
+        where: {
+          deleted_at: null,
+          status: { in: ["cancelled", "refunded"] },
+          ...(createdAt ? { created_at: createdAt } : {}),
+        },
+        orderBy: { created_at: "desc" },
+        take: limit,
+        select: {
+          id: true,
+          created_at: true,
+          total_cents: true,
+          status: true,
+          terminal_id: true,
+          operator_id: true,
+          operator: {
+            select: {
+              name: true,
+            },
+          },
+        },
+      }),
+      prisma.sale.groupBy({
+        by: ["operator_id"],
+        where: {
+          deleted_at: null,
+          status: { in: ["cancelled", "refunded"] },
+          created_at: {
+            gte: new Date(new Date().setHours(0, 0, 0, 0)),
+            lte: new Date(new Date().setHours(23, 59, 59, 999)),
+          },
+        },
+        _count: {
+          _all: true,
+        },
+      }),
+    ]);
+
+    const operatorIds = groupedToday.map((item) => item.operator_id);
+    const users = operatorIds.length > 0
+      ? await prisma.user.findMany({
+          where: { id: { in: operatorIds } },
+          select: { id: true, name: true },
+        })
+      : [];
+
+    const userMap = new Map(users.map((user) => [user.id, user.name]));
+
+    return {
+      data: rows,
+      operator_alerts_today: groupedToday
+        .filter((item) => item._count._all > 3)
+        .map((item) => ({
+          operator_id: item.operator_id,
+          operator_name: userMap.get(item.operator_id) ?? "Operador",
+          count: item._count._all,
+        })),
+    };
+  }
+}

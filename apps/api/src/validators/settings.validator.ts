@@ -69,3 +69,40 @@ export function validateUpdatePixSettings(
   req.body = result.data;
   next();
 }
+
+const updateGeneralSettingsSchema = z
+  .object({
+    discount_limit_daily: z.number().int().nonnegative().optional(),
+    discount_limit_weekly: z.number().int().nonnegative().optional(),
+    discount_limit_monthly: z.number().int().nonnegative().optional(),
+  })
+  .refine(
+    (data) =>
+      data.discount_limit_daily !== undefined ||
+      data.discount_limit_weekly !== undefined ||
+      data.discount_limit_monthly !== undefined,
+    {
+      message: "Informe ao menos um limite para atualização.",
+      path: ["discount_limit_daily"],
+    },
+  );
+
+export function validateUpdateGeneralSettings(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  const result = updateGeneralSettingsSchema.safeParse(req.body);
+
+  if (!result.success) {
+    res.status(400).json({
+      success: false,
+      message: "Dados inválidos",
+      errors: result.error.flatten().fieldErrors,
+    });
+    return;
+  }
+
+  req.body = result.data;
+  next();
+}

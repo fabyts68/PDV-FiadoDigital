@@ -7,5 +7,6 @@ export type { Sale, SaleItem, SalePayment, SaleWithPayments, CreateSalePayload }
 export type { Customer, CreateCustomerPayload } from "./customer.js";
 export type { CashRegister, OpenCashRegisterPayload } from "./cash-register.js";
 export type { Transaction } from "./transaction.js";
+export type { StockMovement, StockMovementType } from "./stock-movement.js";
 export type { AuditLog } from "./audit-log.js";
 export type { ApiResponse, PaginatedResponse } from "./api.js";

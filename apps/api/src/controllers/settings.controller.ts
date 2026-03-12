@@ -4,6 +4,29 @@ import { SettingsService } from "../services/settings.service.js";
 const settingsService = new SettingsService();
 
 export class SettingsController {
+  async getSettings(_req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const settings = await settingsService.getGeneralSettings();
+      res.json({ success: true, data: settings });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async updateSettings(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const settings = await settingsService.updateGeneralSettings({
+        discount_limit_daily: req.body.discount_limit_daily,
+        discount_limit_weekly: req.body.discount_limit_weekly,
+        discount_limit_monthly: req.body.discount_limit_monthly,
+      });
+
+      res.json({ success: true, data: settings });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getPixSettings(_req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const settings = await settingsService.getPixSettings();
