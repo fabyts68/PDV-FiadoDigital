@@ -1,12 +1,12 @@
-export type { User, CreateUserPayload } from "./user.js";
+export type { User, CreateUserPayload, UpdateUserData } from "./user.js";
 export type { Product, ProductWeightUnit, CreateProductPayload, UpdateProductPayload } from "./product.js";
 export type { Brand, CreateBrandPayload, UpdateBrandPayload } from "./brand.js";
 export type { ProductType, CreateProductTypePayload, UpdateProductTypePayload } from "./product-type.js";
 export type { CardMachine, CardMachineRate, CreateCardMachinePayload, UpdateCardMachinePayload } from "./card-machine.js";
 export type { Sale, SaleItem, SalePayment, SaleWithPayments, CreateSalePayload } from "./sale.js";
-export type { Customer, CreateCustomerPayload } from "./customer.js";
+export type { Customer, CreateCustomerPayload, CustomerQueryParams } from "./customer.js";
 export type { CashRegister, OpenCashRegisterPayload } from "./cash-register.js";
 export type { Transaction } from "./transaction.js";
 export type { StockMovement, StockMovementType } from "./stock-movement.js";
 export type { AuditLog } from "./audit-log.js";
-export type { ApiResponse, PaginatedResponse } from "./api.js";
+export type { ApiResponse, PaginatedResult, PaginatedResponse } from "./api.js";

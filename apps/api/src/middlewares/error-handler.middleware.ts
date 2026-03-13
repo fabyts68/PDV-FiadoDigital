@@ -18,6 +18,10 @@ export function errorHandler(
 function getStatusCode(err: Error): number {
   if (err.message.includes("não encontrad")) return 404;
   if (err.message.includes("PIN inválido ou não configurado.")) return 403;
+  if (err.message.includes("PIN de gerente inválido")) return 403;
+  if (err.message.includes("Cancelamento permitido apenas no dia")) return 422;
+  if (err.message.includes("Estorno permitido somente até")) return 422;
+  if (err.message.includes("Apenas vendas concluídas")) return 422;
   if (err.message.includes("Senha incorreta. Alteração não autorizada.")) return 403;
   if (err.message.includes("Saldo de crédito insuficiente")) return 422;
   if (err.message.includes("Chave Pix não configurada")) return 422;

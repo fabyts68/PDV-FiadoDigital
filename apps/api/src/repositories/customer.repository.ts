@@ -1,28 +1,16 @@
 import { prisma } from "../config/database.js";
-import type { SaleWithPayments, SalePayment, Transaction } from "@pdv/shared";
+import type {
+  Customer,
+  CustomerQueryParams,
+  PaginatedResult,
+  SaleWithPayments,
+  SalePayment,
+  Transaction,
+} from "@pdv/shared";
 import { PAYMENT_METHODS } from "@pdv/shared";
 
 const DEFAULT_PER_PAGE = 10;
 const MAX_PER_PAGE = 100;
-
-export interface FindAllOptions {
-  search?: string;
-  onlyActive?: boolean;
-  page?: number;
-  perPage?: number;
-  sortBy?: "name" | "credit_limit_cents" | "payment_due_day" | "current_debt_cents" | "is_active";
-  sortOrder?: "asc" | "desc";
-}
-
-export interface PaginatedResult<T> {
-  data: T[];
-  pagination: {
-    page: number;
-    per_page: number;
-    total: number;
-    total_pages: number;
-  };
-}
 
 export interface PeriodFilter {
   month?: number;
@@ -59,24 +47,44 @@ function buildCreatedAtRange(filter?: PeriodFilter): { gte: Date; lt: Date } | u
   };
 }
 
+function toCustomer(customer: {
+  id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  credit_limit_cents: number;
+  current_debt_cents: number;
+  payment_due_day: number | null;
+  credit_blocked: boolean;
+  is_active: boolean;
+  created_at: Date;
+  updated_at: Date;
+}): Customer {
+  return {
+    ...customer,
+    created_at: customer.created_at.toISOString(),
+    updated_at: customer.updated_at.toISOString(),
+  };
+}
+
 export class CustomerRepository {
-  async findAll(options?: FindAllOptions): Promise<PaginatedResult<any>> {
+  async findAll(params: CustomerQueryParams): Promise<PaginatedResult<Customer>> {
     const {
-      search = undefined,
-      onlyActive = false,
+      search,
+      only_active = false,
       page = 1,
-      perPage = DEFAULT_PER_PAGE,
-      sortBy = "name",
-      sortOrder = "asc",
-    } = options || {};
+      per_page = DEFAULT_PER_PAGE,
+      sort_by = "name",
+      sort_order = "asc",
+    } = params;
 
     const normalizedSearch = search?.trim();
-    const validPerPage = Math.min(Math.max(perPage || DEFAULT_PER_PAGE, 1), MAX_PER_PAGE);
+    const validPerPage = Math.min(Math.max(per_page || DEFAULT_PER_PAGE, 1), MAX_PER_PAGE);
     const validPage = Math.max(page || 1, 1);
 
     const where = {
       deleted_at: null,
-      ...(onlyActive ? { is_active: true } : {}),
+      ...(only_active ? { is_active: true } : {}),
       ...(normalizedSearch
         ? {
             OR: [
@@ -94,14 +102,14 @@ export class CustomerRepository {
         where,
         skip: (validPage - 1) * validPerPage,
         take: validPerPage,
-        orderBy: { [sortBy]: sortOrder },
+        orderBy: { [sort_by]: sort_order },
       }),
     ]);
 
     const totalPages = Math.ceil(total / validPerPage);
 
     return {
-      data,
+      data: data.map(toCustomer),
       pagination: {
         page: validPage,
         per_page: validPerPage,
@@ -111,10 +119,16 @@ export class CustomerRepository {
     };
   }
 
-  async findById(id: string) {
-    return prisma.customer.findFirst({
+  async findById(id: string): Promise<Customer | null> {
+    const customer = await prisma.customer.findFirst({
       where: { id, deleted_at: null },
     });
+
+    if (!customer) {
+      return null;
+    }
+
+    return toCustomer(customer);
   }
 
   async findFiadoHistoryByCustomerId(

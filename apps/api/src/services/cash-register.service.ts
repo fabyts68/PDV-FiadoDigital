@@ -1,10 +1,11 @@
 import { CashRegisterRepository } from "../repositories/cash-register.repository.js";
+import type { CashRegisterQueryParams } from "../repositories/cash-register.repository.js";
 
 const cashRegisterRepository = new CashRegisterRepository();
 
 export class CashRegisterService {
-  async list() {
-    return cashRegisterRepository.findAll();
+  async list(options: CashRegisterQueryParams) {
+    return cashRegisterRepository.findAll(options);
   }
 
   async getCurrent(terminalId: string) {

@@ -3,13 +3,53 @@ import { PAYMENT_METHODS } from "@pdv/shared";
 import type { Prisma } from "@prisma/client";
 import type { CreateSalePayload } from "@pdv/shared";
 
+export interface SaleQueryParams {
+  page: number;
+  per_page: number;
+  from_date?: Date;
+  to_date?: Date;
+  status?: "completed" | "cancelled" | "refunded";
+  terminal_id?: string;
+  operator_id?: string;
+}
+
 export class SaleRepository {
-  async findAll() {
-    return prisma.sale.findMany({
-      where: { deleted_at: null },
-      include: { items: true, payments: true },
-      orderBy: { created_at: "desc" },
-    });
+  async findAll(params: SaleQueryParams) {
+    const where: Prisma.SaleWhereInput = {
+      deleted_at: null,
+      ...(params.status ? { status: params.status } : {}),
+      ...(params.terminal_id ? { terminal_id: params.terminal_id } : {}),
+      ...(params.operator_id ? { operator_id: params.operator_id } : {}),
+      ...(params.from_date || params.to_date
+        ? {
+            created_at: {
+              ...(params.from_date ? { gte: params.from_date } : {}),
+              ...(params.to_date ? { lte: params.to_date } : {}),
+            },
+          }
+        : {}),
+    };
+
+    const [total, data] = await Promise.all([
+      prisma.sale.count({ where }),
+      prisma.sale.findMany({
+        where,
+        include: { items: true, payments: true },
+        orderBy: { created_at: "desc" },
+        take: params.per_page,
+        skip: (params.page - 1) * params.per_page,
+      }),
+    ]);
+
+    return {
+      data,
+      pagination: {
+        page: params.page,
+        per_page: params.per_page,
+        total,
+        total_pages: Math.ceil(total / params.per_page),
+      },
+    };
   }
 
   async findById(id: string) {
@@ -76,20 +116,24 @@ export class SaleRepository {
       });
 
       // 2. Validar e decrementar estoque de cada produto vendido
+      const uniqueProductIds = Array.from(new Set(payload.items.map((item) => item.product_id)));
+      const products = await tx.product.findMany({
+        where: { id: { in: uniqueProductIds } },
+        select: {
+          id: true,
+          name: true,
+          is_bulk: true,
+          stock_quantity: true,
+          min_stock_alert: true,
+          average_cost_cents: true,
+        },
+      });
+      const productMap = new Map(products.map((product) => [product.id, product]));
+
       const lowStockProducts = [];
 
       for (const item of payload.items) {
-        const product = await tx.product.findUnique({
-          where: { id: item.product_id },
-          select: {
-            id: true,
-            name: true,
-            is_bulk: true,
-            stock_quantity: true,
-            min_stock_alert: true,
-            average_cost_cents: true,
-          },
-        });
+        const product = productMap.get(item.product_id);
 
         if (!product) {
           throw new Error(`Produto não encontrado: ${item.product_id}`);
@@ -271,17 +315,153 @@ export class SaleRepository {
     throw new Error("Dados inválidos: Limite de crédito insuficiente para esta venda no fiado.");
   }
 
-  async cancel(id: string) {
-    return prisma.sale.update({
-      where: { id },
-      data: { status: "cancelled" },
+  async cancel(id: string, operatorId: string): Promise<void> {
+    const sale = await prisma.sale.findFirst({
+      where: { id, deleted_at: null },
+      include: { items: true, payments: true },
+    });
+
+    if (!sale) {
+      throw new Error("Venda não encontrada");
+    }
+
+    if (sale.status !== "completed") {
+      throw new Error("Apenas vendas concluídas podem ser canceladas.");
+    }
+
+    const cashRegister = await prisma.cashRegister.findFirst({
+      where: { terminal_id: sale.terminal_id },
+      orderBy: { opened_at: "desc" },
+    });
+
+    if (!cashRegister) {
+      throw new Error("Caixa não encontrado para este terminal");
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.sale.update({ where: { id }, data: { status: "cancelled" } });
+
+      for (const item of sale.items) {
+        await tx.product.update({
+          where: { id: item.product_id },
+          data: { stock_quantity: { increment: item.quantity } },
+        });
+
+        await tx.stockMovement.create({
+          data: {
+            product_id: item.product_id,
+            type: "adjustment",
+            quantity: item.quantity,
+            unit_cost_cents: item.unit_price_cents,
+            description: `Reposição por cancelamento da venda #${sale.id.slice(0, 8)}`,
+            operator_id: operatorId,
+          },
+        });
+      }
+
+      const fiadoPayment = sale.payments.find((p) => p.method === "fiado");
+
+      if (fiadoPayment && sale.customer_id) {
+        const customer = await tx.customer.findUnique({
+          where: { id: sale.customer_id },
+          select: { current_debt_cents: true },
+        });
+        const newDebt = Math.max(
+          0,
+          (customer?.current_debt_cents ?? 0) - fiadoPayment.amount_cents,
+        );
+        await tx.customer.update({
+          where: { id: sale.customer_id },
+          data: { current_debt_cents: newDebt },
+        });
+      }
+
+      await tx.transaction.create({
+        data: {
+          type: "cancellation",
+          amount_cents: -sale.total_cents,
+          sale_id: sale.id,
+          customer_id: sale.customer_id ?? null,
+          cash_register_id: cashRegister.id,
+          operator_id: operatorId,
+          description: `Cancelamento da venda #${sale.id.slice(0, 8)}`,
+        },
+      });
     });
   }
 
-  async refund(id: string) {
-    return prisma.sale.update({
-      where: { id },
-      data: { status: "refunded" },
+  async refund(id: string, operatorId: string): Promise<void> {
+    const sale = await prisma.sale.findFirst({
+      where: { id, deleted_at: null },
+      include: { items: true, payments: true },
+    });
+
+    if (!sale) {
+      throw new Error("Venda não encontrada");
+    }
+
+    if (sale.status !== "completed") {
+      throw new Error("Apenas vendas concluídas podem ser estornadas.");
+    }
+
+    const cashRegister = await prisma.cashRegister.findFirst({
+      where: { terminal_id: sale.terminal_id },
+      orderBy: { opened_at: "desc" },
+    });
+
+    if (!cashRegister) {
+      throw new Error("Caixa não encontrado para este terminal");
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.sale.update({ where: { id }, data: { status: "refunded" } });
+
+      for (const item of sale.items) {
+        await tx.product.update({
+          where: { id: item.product_id },
+          data: { stock_quantity: { increment: item.quantity } },
+        });
+
+        await tx.stockMovement.create({
+          data: {
+            product_id: item.product_id,
+            type: "adjustment",
+            quantity: item.quantity,
+            unit_cost_cents: item.unit_price_cents,
+            description: `Reposição por estorno da venda #${sale.id.slice(0, 8)}`,
+            operator_id: operatorId,
+          },
+        });
+      }
+
+      const fiadoPayment = sale.payments.find((p) => p.method === "fiado");
+
+      if (fiadoPayment && sale.customer_id) {
+        const customer = await tx.customer.findUnique({
+          where: { id: sale.customer_id },
+          select: { current_debt_cents: true },
+        });
+        const newDebt = Math.max(
+          0,
+          (customer?.current_debt_cents ?? 0) - fiadoPayment.amount_cents,
+        );
+        await tx.customer.update({
+          where: { id: sale.customer_id },
+          data: { current_debt_cents: newDebt },
+        });
+      }
+
+      await tx.transaction.create({
+        data: {
+          type: "refund",
+          amount_cents: -sale.total_cents,
+          sale_id: sale.id,
+          customer_id: sale.customer_id ?? null,
+          cash_register_id: cashRegister.id,
+          operator_id: operatorId,
+          description: `Estorno da venda #${sale.id.slice(0, 8)}`,
+        },
+      });
     });
   }
 }

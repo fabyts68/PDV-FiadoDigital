@@ -18,3 +18,10 @@ export type CreateUserPayload = {
   role: Role;
   can_view_cost_price?: boolean;
 };
+
+export interface UpdateUserData {
+  name?: string;
+  username?: string;
+  password_hash?: string;
+  can_view_cost_price?: boolean;
+}

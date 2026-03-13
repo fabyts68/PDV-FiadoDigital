@@ -5,6 +5,17 @@ type SortDirection = "asc" | "desc";
 
 type StockSortKey = "name" | "type" | "brand" | "stock" | "average_cost" | "stock_value";
 
+type StockSummaryRow = {
+  is_bulk: boolean;
+  stock_quantity: number;
+  min_stock_alert: number;
+  average_cost_cents: number;
+  stock_value_cents: number;
+  product_type: {
+    name: string;
+  } | null;
+};
+
 function toRange(startDate?: string, endDate?: string): { gte?: Date; lte?: Date } | undefined {
   if (!startDate && !endDate) {
     return undefined;
@@ -23,17 +34,6 @@ function toRange(startDate?: string, endDate?: string): { gte?: Date; lte?: Date
   return range;
 }
 
-function hasCashPayment(sale: {
-  payment_method: string;
-  payments: Array<{ method: string }>;
-}): boolean {
-  if (sale.payment_method === PAYMENT_METHODS.CASH) {
-    return true;
-  }
-
-  return sale.payments.some((payment) => payment.method === PAYMENT_METHODS.CASH);
-}
-
 export class ControlRepository {
   async getStockSummary(options?: {
     product_type_id?: string;
@@ -48,29 +48,42 @@ export class ControlRepository {
     const sortBy = options?.sort_by ?? "name";
     const sortOrder: SortDirection = options?.sort_order ?? "asc";
 
-    const products = await prisma.product.findMany({
-      where: {
-        deleted_at: null,
-        ...(options?.product_type_id ? { product_type_id: options.product_type_id } : {}),
-        ...(options?.brand_id ? { brand_id: options.brand_id } : {}),
-      },
-      include: {
-        product_type: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-        brand: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-      },
-    });
+    const where = {
+      deleted_at: null,
+      ...(options?.product_type_id ? { product_type_id: options.product_type_id } : {}),
+      ...(options?.brand_id ? { brand_id: options.brand_id } : {}),
+    };
 
-    const rows = products.map((product) => {
+    const DB_SORT_MAP: Partial<Record<StockSortKey, string>> = {
+      name: "name",
+      stock: "stock_quantity",
+      average_cost: "average_cost_cents",
+    };
+    const dbSortField = DB_SORT_MAP[sortBy];
+
+    const mapProductRow = (product: {
+      id: string;
+      name: string;
+      barcode: string | null;
+      brand_id: string | null;
+      description: string | null;
+      weight_value: number | null;
+      weight_unit: string | null;
+      product_type_id: string | null;
+      profit_margin: number | null;
+      price_cents: number;
+      cost_price_cents: number;
+      average_cost_cents: number;
+      stock_quantity: number;
+      min_stock_alert: number;
+      is_bulk: boolean;
+      is_active: boolean;
+      created_at: Date;
+      updated_at: Date;
+      deleted_at: Date | null;
+      product_type: { id: string; name: string } | null;
+      brand: { id: string; name: string } | null;
+    }) => {
       const effectiveAverageCostCents = product.average_cost_cents > 0
         ? product.average_cost_cents
         : product.cost_price_cents;
@@ -82,50 +95,122 @@ export class ControlRepository {
         stock_value_cents: stockValueCents,
         low_stock: product.stock_quantity <= product.min_stock_alert,
       };
-    });
+    };
 
-    const sorted = [...rows].sort((left, right) => {
-      const direction = sortOrder === "asc" ? 1 : -1;
+    let data: ReturnType<typeof mapProductRow>[] = [];
+    let total = 0;
+    let rowsForSummary: StockSummaryRow[] = [];
 
-      if (sortBy === "name") {
-        return direction * left.name.localeCompare(right.name, "pt-BR");
-      }
+    if (dbSortField) {
+      const [count, products, summaryProducts] = await Promise.all([
+        prisma.product.count({ where }),
+        prisma.product.findMany({
+          where,
+          include: {
+            product_type: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+            brand: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+          orderBy: { [dbSortField]: sortOrder },
+          take: perPage,
+          skip: (page - 1) * perPage,
+        }),
+        prisma.product.findMany({
+          where,
+          select: {
+            is_bulk: true,
+            stock_quantity: true,
+            min_stock_alert: true,
+            average_cost_cents: true,
+            cost_price_cents: true,
+            product_type: {
+              select: {
+                name: true,
+              },
+            },
+          },
+        }),
+      ]);
 
-      if (sortBy === "type") {
-        return direction * (left.product_type?.name ?? "").localeCompare(right.product_type?.name ?? "", "pt-BR");
-      }
+      total = count;
+      data = products.map(mapProductRow);
+      rowsForSummary = summaryProducts.map((item) => ({
+        ...item,
+        stock_value_cents: Math.round(
+          item.stock_quantity * (item.average_cost_cents > 0 ? item.average_cost_cents : item.cost_price_cents),
+        ),
+      }));
+    }
 
-      if (sortBy === "brand") {
-        return direction * (left.brand?.name ?? "").localeCompare(right.brand?.name ?? "", "pt-BR");
-      }
+    if (!dbSortField) {
+      const products = await prisma.product.findMany({
+        where,
+        include: {
+          product_type: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          brand: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      });
 
-      if (sortBy === "stock") {
-        return direction * (left.stock_quantity - right.stock_quantity);
-      }
+      const rows = products.map(mapProductRow);
+      const sorted = [...rows].sort((left, right) => {
+        const direction = sortOrder === "asc" ? 1 : -1;
 
-      if (sortBy === "average_cost") {
-        return direction * (left.average_cost_cents - right.average_cost_cents);
-      }
+        if (sortBy === "type") {
+          return direction * (left.product_type?.name ?? "").localeCompare(right.product_type?.name ?? "", "pt-BR");
+        }
 
-      return direction * (left.stock_value_cents - right.stock_value_cents);
-    });
+        if (sortBy === "brand") {
+          return direction * (left.brand?.name ?? "").localeCompare(right.brand?.name ?? "", "pt-BR");
+        }
 
-    const total = sorted.length;
+        return direction * (left.stock_value_cents - right.stock_value_cents);
+      });
+
+      total = sorted.length;
+      const start = (page - 1) * perPage;
+      data = sorted.slice(start, start + perPage);
+      rowsForSummary = rows.map((item) => ({
+        is_bulk: item.is_bulk,
+        stock_quantity: item.stock_quantity,
+        min_stock_alert: item.min_stock_alert,
+        average_cost_cents: item.average_cost_cents,
+        stock_value_cents: item.stock_value_cents,
+        product_type: item.product_type ? { name: item.product_type.name } : null,
+      }));
+    }
+
     const totalPages = Math.ceil(total / perPage);
-    const start = (page - 1) * perPage;
-    const data = sorted.slice(start, start + perPage);
 
-    const totalItemsQuantity = rows
+    const totalItemsQuantity = rowsForSummary
       .filter((item) => !item.is_bulk)
       .reduce((acc, item) => acc + Math.trunc(item.stock_quantity), 0);
 
-    const totalBulkQuantity = rows
+    const totalBulkQuantity = rowsForSummary
       .filter((item) => item.is_bulk)
       .reduce((acc, item) => acc + item.stock_quantity, 0);
 
     const bulkByTypeMap = new Map<string, number>();
 
-    for (const row of rows) {
+    for (const row of rowsForSummary) {
       if (!row.is_bulk) {
         continue;
       }
@@ -139,10 +224,10 @@ export class ControlRepository {
       .map(([typeName, totalKg]) => ({ type_name: typeName, total_kg: totalKg }))
       .sort((left, right) => left.type_name.localeCompare(right.type_name, "pt-BR"));
 
-    const totalStockValueCents = rows.reduce((acc, item) => acc + item.stock_value_cents, 0);
+    const totalStockValueCents = rowsForSummary.reduce((acc, item) => acc + item.stock_value_cents, 0);
 
-    const weightedBase = rows.reduce((acc, item) => acc + item.stock_quantity * item.average_cost_cents, 0);
-    const weightedStock = rows.reduce((acc, item) => acc + item.stock_quantity, 0);
+    const weightedBase = rowsForSummary.reduce((acc, item) => acc + item.stock_quantity * item.average_cost_cents, 0);
+    const weightedStock = rowsForSummary.reduce((acc, item) => acc + item.stock_quantity, 0);
     const weightedAverageCostCents = weightedStock > 0 ? Math.round(weightedBase / weightedStock) : 0;
 
     return {
@@ -167,25 +252,50 @@ export class ControlRepository {
   async getCashSummary(startDate?: string, endDate?: string) {
     const createdAt = toRange(startDate, endDate);
 
-    const sales = await prisma.sale.findMany({
-      where: {
-        deleted_at: null,
-        status: "completed",
-        ...(createdAt ? { created_at: createdAt } : {}),
-      },
-      select: {
-        id: true,
-        payment_method: true,
-        total_cents: true,
-        discount_cents: true,
-        payments: {
-          select: {
-            method: true,
-            amount_cents: true,
+    const [paymentGroups, legacySaleGroups, cashDiscountAggregate] = await Promise.all([
+      prisma.salePayment.groupBy({
+        by: ["method"],
+        where: {
+          sale: {
+            deleted_at: null,
+            status: "completed",
+            ...(createdAt ? { created_at: createdAt } : {}),
           },
         },
-      },
-    });
+        _sum: {
+          amount_cents: true,
+        },
+      }),
+      prisma.sale.groupBy({
+        by: ["payment_method"],
+        where: {
+          deleted_at: null,
+          status: "completed",
+          payments: {
+            none: {},
+          },
+          ...(createdAt ? { created_at: createdAt } : {}),
+        },
+        _sum: {
+          total_cents: true,
+        },
+      }),
+      prisma.sale.aggregate({
+        where: {
+          deleted_at: null,
+          status: "completed",
+          discount_cents: { gt: 0 },
+          ...(createdAt ? { created_at: createdAt } : {}),
+          OR: [
+            { payment_method: PAYMENT_METHODS.CASH },
+            { payments: { some: { method: PAYMENT_METHODS.CASH } } },
+          ],
+        },
+        _sum: {
+          discount_cents: true,
+        },
+      }),
+    ]);
 
     const totals = {
       cash_cents: 0,
@@ -196,55 +306,55 @@ export class ControlRepository {
       total_cents: 0,
     };
 
-    for (const sale of sales) {
-      if (sale.payments.length > 0) {
-        for (const payment of sale.payments) {
-          if (payment.method === PAYMENT_METHODS.CASH) {
-            totals.cash_cents += payment.amount_cents;
-          }
+    for (const group of paymentGroups) {
+      const amount = group._sum.amount_cents ?? 0;
 
-          if (payment.method === PAYMENT_METHODS.CREDIT_CARD) {
-            totals.credit_card_cents += payment.amount_cents;
-          }
-
-          if (payment.method === PAYMENT_METHODS.DEBIT_CARD) {
-            totals.debit_card_cents += payment.amount_cents;
-          }
-
-          if (payment.method === PAYMENT_METHODS.PIX) {
-            totals.pix_cents += payment.amount_cents;
-          }
-
-          if (payment.method === PAYMENT_METHODS.FIADO) {
-            totals.fiado_cents += payment.amount_cents;
-          }
-        }
-      } else {
-        if (sale.payment_method === PAYMENT_METHODS.CASH) {
-          totals.cash_cents += sale.total_cents;
-        }
-
-        if (sale.payment_method === PAYMENT_METHODS.CREDIT_CARD) {
-          totals.credit_card_cents += sale.total_cents;
-        }
-
-        if (sale.payment_method === PAYMENT_METHODS.DEBIT_CARD) {
-          totals.debit_card_cents += sale.total_cents;
-        }
-
-        if (sale.payment_method === PAYMENT_METHODS.PIX) {
-          totals.pix_cents += sale.total_cents;
-        }
-
-        if (sale.payment_method === PAYMENT_METHODS.FIADO) {
-          totals.fiado_cents += sale.total_cents;
-        }
+      if (group.method === PAYMENT_METHODS.CASH) {
+        totals.cash_cents += amount;
       }
 
-      if (hasCashPayment(sale)) {
-        totals.cash_cents -= sale.discount_cents;
+      if (group.method === PAYMENT_METHODS.CREDIT_CARD) {
+        totals.credit_card_cents += amount;
+      }
+
+      if (group.method === PAYMENT_METHODS.DEBIT_CARD) {
+        totals.debit_card_cents += amount;
+      }
+
+      if (group.method === PAYMENT_METHODS.PIX) {
+        totals.pix_cents += amount;
+      }
+
+      if (group.method === PAYMENT_METHODS.FIADO) {
+        totals.fiado_cents += amount;
       }
     }
+
+    for (const group of legacySaleGroups) {
+      const amount = group._sum.total_cents ?? 0;
+
+      if (group.payment_method === PAYMENT_METHODS.CASH) {
+        totals.cash_cents += amount;
+      }
+
+      if (group.payment_method === PAYMENT_METHODS.CREDIT_CARD) {
+        totals.credit_card_cents += amount;
+      }
+
+      if (group.payment_method === PAYMENT_METHODS.DEBIT_CARD) {
+        totals.debit_card_cents += amount;
+      }
+
+      if (group.payment_method === PAYMENT_METHODS.PIX) {
+        totals.pix_cents += amount;
+      }
+
+      if (group.payment_method === PAYMENT_METHODS.FIADO) {
+        totals.fiado_cents += amount;
+      }
+    }
+
+    totals.cash_cents -= cashDiscountAggregate._sum.discount_cents ?? 0;
 
     if (totals.cash_cents < 0) {
       totals.cash_cents = 0;
@@ -263,29 +373,28 @@ export class ControlRepository {
   async getDiscountSummary(startDate?: string, endDate?: string) {
     const createdAt = toRange(startDate, endDate);
 
-    const sales = await prisma.sale.findMany({
+    const result = await prisma.sale.aggregate({
       where: {
         deleted_at: null,
         status: "completed",
         discount_cents: { gt: 0 },
         ...(createdAt ? { created_at: createdAt } : {}),
+        OR: [
+          { payment_method: PAYMENT_METHODS.CASH },
+          { payments: { some: { method: PAYMENT_METHODS.CASH } } },
+        ],
       },
-      select: {
+      _sum: {
         discount_cents: true,
-        payment_method: true,
-        payments: {
-          select: {
-            method: true,
-          },
-        },
+      },
+      _count: {
+        id: true,
       },
     });
 
-    const applicableSales = sales.filter((sale) => hasCashPayment(sale));
-
     return {
-      total_discount_cents: applicableSales.reduce((acc, sale) => acc + sale.discount_cents, 0),
-      occurrences: applicableSales.length,
+      total_discount_cents: result._sum.discount_cents ?? 0,
+      occurrences: result._count.id,
     };
   }
 

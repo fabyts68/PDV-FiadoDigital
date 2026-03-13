@@ -10,3 +10,14 @@ export const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+export const pinRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: {
+    success: false,
+    message: "Muitas tentativas. Aguarde 15 minutos.",
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});

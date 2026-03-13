@@ -572,7 +572,7 @@ async function loadStockMovements(productId: string): Promise<void> {
   movementError.value = null;
 
   try {
-    const response = await authenticatedFetch(`/api/control/stock-movements/${productId}`);
+    const response = await authenticatedFetch(`/api/stock-movements/${productId}`);
     const json = await response.json();
 
     if (!response.ok) {
@@ -634,7 +634,7 @@ async function submitAdjustment(): Promise<void> {
   adjustmentError.value = null;
 
   try {
-    const response = await authenticatedFetch("/api/control/stock-adjustment", {
+    const response = await authenticatedFetch("/api/stock-movements/adjustment", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

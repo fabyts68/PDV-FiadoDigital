@@ -1,4 +1,5 @@
 import { ref, onMounted, onUnmounted } from "vue";
+import { useAuthStore } from "@/stores/auth.store.js";
 
 type WsMessage = {
   type: string;
@@ -6,14 +7,23 @@ type WsMessage = {
 };
 
 export function useWebSocket() {
+  const authStore = useAuthStore();
   const isConnected = ref(false);
   const lastMessage = ref<WsMessage | null>(null);
   let socket: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   function connect(): void {
+    const token = authStore.accessToken;
+
+    if (!token) {
+      isConnected.value = false;
+      scheduleReconnect();
+      return;
+    }
+
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${protocol}//${window.location.host}/ws`;
+    const url = `${protocol}//${window.location.host}/ws?token=${encodeURIComponent(token)}`;
 
     socket = new WebSocket(url);
 

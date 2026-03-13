@@ -45,7 +45,8 @@ export class UserController {
     next: NextFunction,
   ): Promise<void> {
     try {
-      const user = await userService.update(req.params.id as string, req.body);
+      const changedById = req.user?.sub as string;
+      const user = await userService.update(req.params.id as string, req.body, changedById);
       res.json({ success: true, data: user });
     } catch (error) {
       next(error);

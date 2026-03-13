@@ -2,6 +2,7 @@ import { Router } from "express";
 import { CashRegisterController } from "../controllers/cash-register.controller.js";
 import { authenticate } from "../middlewares/auth.middleware.js";
 import { authorize } from "../middlewares/role.middleware.js";
+import { validateListCashRegisters } from "../validators/cash-register.validator.js";
 
 export const cashRegisterRouter = Router();
 const controller = new CashRegisterController();
@@ -11,6 +12,7 @@ cashRegisterRouter.use(authenticate);
 cashRegisterRouter.get(
   "/",
   authorize("admin", "manager", "operator"),
+  validateListCashRegisters,
   controller.list,
 );
 cashRegisterRouter.get(

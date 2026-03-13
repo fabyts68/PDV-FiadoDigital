@@ -4,8 +4,7 @@ export type ApiResponse<T> = {
   message?: string;
 };
 
-export type PaginatedResponse<T> = {
-  success: boolean;
+export type PaginatedResult<T> = {
   data: T[];
   pagination: {
     page: number;
@@ -14,3 +13,5 @@ export type PaginatedResponse<T> = {
     total_pages: number;
   };
 };
+
+export type PaginatedResponse<T> = ApiResponse<PaginatedResult<T>>;

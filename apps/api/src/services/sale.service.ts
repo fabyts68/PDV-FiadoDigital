@@ -1,15 +1,20 @@
 import { SaleRepository } from "../repositories/sale.repository.js";
 import { CustomerRepository } from "../repositories/customer.repository.js";
+import { AuthService } from "./auth.service.js";
+import { AuditLogRepository } from "../repositories/audit-log.repository.js";
 import { broadcast } from "../websocket/index.js";
 import { formatCents, PAYMENT_METHODS } from "@pdv/shared";
 import type { CreateSalePayload } from "@pdv/shared";
+import type { SaleQueryParams } from "../repositories/sale.repository.js";
 
 const saleRepository = new SaleRepository();
 const customerRepository = new CustomerRepository();
+const authService = new AuthService();
+const auditLogRepository = new AuditLogRepository();
 
 export class SaleService {
-  async list() {
-    return saleRepository.findAll();
+  async list(params: SaleQueryParams) {
+    return saleRepository.findAll(params);
   }
 
   async getById(id: string) {
@@ -132,11 +137,75 @@ export class SaleService {
     return result.sale;
   }
 
-  async cancel(id: string) {
-    return saleRepository.cancel(id);
+  async cancel(id: string, managerPin: string, operatorId: string) {
+    const managerId = await authService.validateManagerPin(managerPin);
+
+    if (!managerId) {
+      throw new Error("PIN de gerente inválido.");
+    }
+
+    const sale = await saleRepository.findById(id);
+
+    if (!sale) {
+      throw new Error("Venda não encontrada");
+    }
+
+    if (sale.status !== "completed") {
+      throw new Error("Apenas vendas concluídas podem ser canceladas.");
+    }
+
+    const today = new Date();
+    const saleDate = new Date(sale.created_at);
+
+    if (today.toDateString() !== saleDate.toDateString()) {
+      throw new Error("Cancelamento permitido apenas no dia da venda.");
+    }
+
+    await saleRepository.cancel(id, operatorId);
+
+    await auditLogRepository.create({
+      action: "sale_cancelled",
+      actor_id: operatorId,
+      entity_type: "sale",
+      entity_id: id,
+      details: { sale_id: id, operator_id: operatorId, manager_id: managerId },
+    });
   }
 
-  async refund(id: string) {
-    return saleRepository.refund(id);
+  async refund(id: string, managerPin: string, operatorId: string) {
+    const managerId = await authService.validateManagerPin(managerPin);
+
+    if (!managerId) {
+      throw new Error("PIN de gerente inválido.");
+    }
+
+    const sale = await saleRepository.findById(id);
+
+    if (!sale) {
+      throw new Error("Venda não encontrada");
+    }
+
+    if (sale.status !== "completed") {
+      throw new Error("Apenas vendas concluídas podem ser estornadas.");
+    }
+
+    const today = new Date();
+    const saleDate = new Date(sale.created_at);
+    const diffMs = today.getTime() - saleDate.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffDays > 7) {
+      throw new Error("Estorno permitido somente até 7 dias após a venda.");
+    }
+
+    await saleRepository.refund(id, operatorId);
+
+    await auditLogRepository.create({
+      action: "sale_refunded",
+      actor_id: operatorId,
+      entity_type: "sale",
+      entity_id: id,
+      details: { sale_id: id, operator_id: operatorId, manager_id: managerId },
+    });
   }
 }

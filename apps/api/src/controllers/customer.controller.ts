@@ -1,9 +1,18 @@
 import type { Request, Response, NextFunction } from "express";
 import { CustomerService } from "../services/customer.service.js";
+import type { CustomerQueryParams } from "@pdv/shared";
 
 const customerService = new CustomerService();
 
 function parsePositiveQueryNumber(rawValue: unknown): number | undefined {
+  if (typeof rawValue === "number") {
+    if (!Number.isFinite(rawValue) || rawValue <= 0) {
+      return undefined;
+    }
+
+    return Math.trunc(rawValue);
+  }
+
   if (typeof rawValue !== "string") {
     return undefined;
   }
@@ -17,23 +26,51 @@ function parsePositiveQueryNumber(rawValue: unknown): number | undefined {
   return parsed;
 }
 
+function parseSortBy(value: unknown): CustomerQueryParams["sort_by"] {
+  const allowedValues: Array<NonNullable<CustomerQueryParams["sort_by"]>> = [
+    "name",
+    "credit_limit_cents",
+    "current_debt_cents",
+    "payment_due_day",
+    "is_active",
+  ];
+
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  if (allowedValues.includes(value as NonNullable<CustomerQueryParams["sort_by"]>)) {
+    return value as NonNullable<CustomerQueryParams["sort_by"]>;
+  }
+
+  return undefined;
+}
+
+function parseSortOrder(value: unknown): CustomerQueryParams["sort_order"] {
+  if (value === "desc") {
+    return "desc";
+  }
+
+  return "asc";
+}
+
 export class CustomerController {
   async list(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const search = typeof req.query.search === "string" ? req.query.search : undefined;
+      const search = typeof req.query.search === "string" ? req.query.search.trim() : undefined;
       const onlyActive = req.query.only_active === "true";
-      const page = typeof req.query.page === "string" ? Number.parseInt(req.query.page, 10) : 1;
-      const perPage = typeof req.query.per_page === "string" ? Number.parseInt(req.query.per_page, 10) : 10;
-      const sortBy = (typeof req.query.sort_by === "string" ? req.query.sort_by : "name") as any;
-      const sortOrder = (typeof req.query.sort_order === "string" ? req.query.sort_order : "asc") as any;
+      const page = parsePositiveQueryNumber(req.query.page) ?? 1;
+      const perPage = parsePositiveQueryNumber(req.query.per_page) ?? 10;
+      const sortBy = parseSortBy(req.query.sort_by);
+      const sortOrder = parseSortOrder(req.query.sort_order);
 
       const result = await customerService.list({
         search,
-        onlyActive,
+        only_active: onlyActive,
         page,
-        perPage,
-        sortBy,
-        sortOrder,
+        per_page: perPage,
+        sort_by: sortBy,
+        sort_order: sortOrder,
       });
 
       res.json({ success: true, data: result.data, pagination: result.pagination });

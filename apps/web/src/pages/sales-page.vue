@@ -1573,8 +1573,8 @@ async function generatePixQRCode(): Promise<void> {
       return;
     }
 
-    const txId = saleStore.saleUuid || crypto.randomUUID();
-    saleStore.saleUuid = txId;
+    const saleUuid = saleStore.saleUuid || crypto.randomUUID();
+    saleStore.saleUuid = saleUuid;
     const pixCents = pixPaymentCents.value;
 
     if (pixCents <= 0) {
@@ -1582,14 +1582,13 @@ async function generatePixQRCode(): Promise<void> {
       return;
     }
 
-    pixQRCodeTxId.value = txId;
+    pixQRCodeTxId.value = "";
     pixQRCodeCents.value = pixCents;
 
     const response = await authenticatedFetch("/api/pix/qrcode", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        tx_id: txId,
         amount_cents: pixCents,
       }),
     });
@@ -1603,6 +1602,7 @@ async function generatePixQRCode(): Promise<void> {
       return;
     }
 
+    pixQRCodeTxId.value = typeof data.data?.tx_id === "string" ? data.data.tx_id : "";
     pixQRCodePayload.value = data.data?.qr_code_payload || "";
     pixQRCodeMerchantName.value = data.data?.merchant_name || "";
 

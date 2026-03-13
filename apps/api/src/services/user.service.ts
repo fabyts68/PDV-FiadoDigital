@@ -1,8 +1,11 @@
 import bcrypt from "bcryptjs";
 import { UserRepository } from "../repositories/user.repository.js";
+import { AuditLogRepository } from "../repositories/audit-log.repository.js";
 import type { CreateUserPayload } from "@pdv/shared";
+import type { UpdateUserData } from "@pdv/shared";
 
 const userRepository = new UserRepository();
+const auditLogRepository = new AuditLogRepository();
 
 export class UserService {
   async list() {
@@ -37,8 +40,30 @@ export class UserService {
     });
   }
 
-  async update(id: string, payload: Partial<CreateUserPayload>) {
-    return userRepository.update(id, payload);
+  async update(id: string, payload: Partial<CreateUserPayload>, changedById: string) {
+    const { password, name, username, can_view_cost_price } = payload;
+    const updateData: UpdateUserData = {
+      name,
+      username,
+      can_view_cost_price,
+    };
+
+    if (password) {
+      const password_hash = await bcrypt.hash(password, 12);
+      const updatedUser = await userRepository.update(id, { ...updateData, password_hash });
+
+      await auditLogRepository.create({
+        action: "password_changed",
+        actor_id: changedById,
+        entity_type: "user",
+        entity_id: id,
+        details: { target_user_id: id, changed_by_id: changedById },
+      });
+
+      return updatedUser;
+    }
+
+    return userRepository.update(id, updateData);
   }
 
   async deactivate(id: string) {

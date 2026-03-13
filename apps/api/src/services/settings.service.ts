@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import { config } from "../config/index.js";
+import { AuditLogRepository } from "../repositories/audit-log.repository.js";
 import { SettingsRepository } from "../repositories/settings.repository.js";
 import { UserRepository } from "../repositories/user.repository.js";
 import type { PixKeyType } from "../utils/pix-key.js";
@@ -15,10 +16,12 @@ const DISCOUNT_LIMIT_MONTHLY_SETTING = "discount_limit_monthly";
 export class SettingsService {
   private settingsRepository: SettingsRepository;
   private userRepository: UserRepository;
+  private auditLogRepository: AuditLogRepository;
 
   constructor() {
     this.settingsRepository = new SettingsRepository();
     this.userRepository = new UserRepository();
+    this.auditLogRepository = new AuditLogRepository();
   }
 
   async getPixSettings(): Promise<{
@@ -73,6 +76,14 @@ export class SettingsService {
       this.settingsRepository.upsert(PIX_MERCHANT_NAME_SETTING, data.merchant_name),
       this.settingsRepository.upsert(PIX_MERCHANT_CITY_SETTING, data.merchant_city),
     ]);
+
+    await this.auditLogRepository.create({
+      action: "pix_key_changed",
+      actor_id: data.user_id,
+      entity_type: "settings",
+      entity_id: PIX_KEY_SETTING,
+      details: { user_id: data.user_id },
+    });
 
     return { success: true };
   }

@@ -10,7 +10,7 @@ export class AuthController {
         username: string;
         password: string;
       };
-      const result = await authService.login(username, password);
+      const result = await authService.login(username, password, req.ip);
 
       res.cookie("refreshToken", result.refreshToken, {
         httpOnly: true,
@@ -79,7 +79,8 @@ export class AuthController {
   ): Promise<void> {
     try {
       const { pin } = req.body as { pin: string };
-      const isValid = await authService.validateManagerPin(pin);
+      const managerId = await authService.validateManagerPin(pin);
+      const isValid = Boolean(managerId);
 
       if (!isValid) {
         res.status(403).json({ success: false, message: "PIN inválido" });

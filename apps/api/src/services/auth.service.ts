@@ -2,9 +2,11 @@ import bcrypt from "bcryptjs";
 import jwt, { type SignOptions } from "jsonwebtoken";
 import { config } from "../config/index.js";
 import { UserRepository } from "../repositories/user.repository.js";
+import { AuditLogRepository } from "../repositories/audit-log.repository.js";
 import { ROLES } from "@pdv/shared";
 
 const userRepository = new UserRepository();
+const auditLogRepository = new AuditLogRepository();
 
 type AuthResult = {
   accessToken: string;
@@ -19,16 +21,37 @@ type AuthResult = {
 };
 
 export class AuthService {
-  async login(username: string, password: string): Promise<AuthResult> {
+  async login(username: string, password: string, ipAddress?: string): Promise<AuthResult> {
     const user = await userRepository.findByUsername(username);
 
     if (!user) {
+      const fallbackActorId = await this.getFallbackAuditActorId();
+
+      if (fallbackActorId) {
+        await auditLogRepository.create({
+          action: "login_failed",
+          actor_id: fallbackActorId,
+          entity_type: "auth",
+          entity_id: username,
+          details: { username },
+          ip_address: ipAddress,
+        });
+      }
+
       throw new Error("Credenciais inválidas");
     }
 
     const validPassword = await bcrypt.compare(password, user.password_hash);
 
     if (!validPassword) {
+      await auditLogRepository.create({
+        action: "login_failed",
+        actor_id: user.id,
+        entity_type: "auth",
+        entity_id: user.id,
+        details: { username },
+        ip_address: ipAddress,
+      });
       throw new Error("Credenciais inválidas");
     }
 
@@ -38,6 +61,14 @@ export class AuthService {
 
     const accessToken = this.generateAccessToken(user.id, user.role);
     const refreshToken = this.generateRefreshToken(user.id);
+
+    await auditLogRepository.create({
+      action: "login",
+      actor_id: user.id,
+      entity_type: "auth",
+      entity_id: user.id,
+      ip_address: ipAddress,
+    });
 
     return {
       accessToken,
@@ -91,14 +122,14 @@ export class AuthService {
     };
   }
 
-  async validateManagerPin(pin: string): Promise<boolean> {
+  async validateManagerPin(pin: string): Promise<string | null> {
     const managers = await userRepository.findActiveByRoles([
       ROLES.ADMIN,
       ROLES.MANAGER,
     ]);
 
     if (managers.length === 0) {
-      return false;
+      return null;
     }
 
     for (const manager of managers) {
@@ -109,11 +140,11 @@ export class AuthService {
       const isMatch = await bcrypt.compare(pin, manager.pin_hash);
 
       if (isMatch) {
-        return true;
+        return manager.id;
       }
     }
 
-    return false;
+    return null;
   }
 
   private generateAccessToken(userId: string, role: string): string {
@@ -126,5 +157,14 @@ export class AuthService {
     return jwt.sign({ sub: userId }, config.jwt.refreshSecret, {
       expiresIn: config.jwt.refreshExpiresIn as SignOptions["expiresIn"],
     });
+  }
+
+  private async getFallbackAuditActorId(): Promise<string | null> {
+    const managers = await userRepository.findActiveByRoles([
+      ROLES.ADMIN,
+      ROLES.MANAGER,
+    ]);
+
+    return managers[0]?.id ?? null;
   }
 }

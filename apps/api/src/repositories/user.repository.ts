@@ -1,4 +1,5 @@
 import { prisma } from "../config/database.js";
+import type { UpdateUserData, User } from "@pdv/shared";
 
 export class UserRepository {
   async findAll() {
@@ -54,8 +55,28 @@ export class UserRepository {
     return prisma.user.create({ data });
   }
 
-  async update(id: string, data: Record<string, unknown>) {
-    return prisma.user.update({ where: { id }, data });
+  async update(id: string, data: UpdateUserData): Promise<User> {
+    const user = await prisma.user.update({
+      where: { id },
+      data,
+      select: {
+        id: true,
+        name: true,
+        username: true,
+        role: true,
+        can_view_cost_price: true,
+        is_active: true,
+        created_at: true,
+        updated_at: true,
+      },
+    });
+
+    return {
+      ...user,
+      role: user.role as User["role"],
+      created_at: user.created_at.toISOString(),
+      updated_at: user.updated_at.toISOString(),
+    };
   }
 
   async softDelete(id: string) {

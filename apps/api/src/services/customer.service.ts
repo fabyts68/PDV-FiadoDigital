@@ -1,16 +1,16 @@
 import { prisma } from "../config/database.js";
-import bcrypt from "bcryptjs";
 import {
   CustomerRepository,
-  type FindAllOptions,
   type PeriodFilter,
 } from "../repositories/customer.repository.js";
-import type { CreateCustomerPayload } from "@pdv/shared";
+import type { CreateCustomerPayload, CustomerQueryParams } from "@pdv/shared";
+import { AuthService } from "./auth.service.js";
 
 const customerRepository = new CustomerRepository();
+const authService = new AuthService();
 
 export class CustomerService {
-  async list(options?: FindAllOptions) {
+  async list(options: CustomerQueryParams) {
     return customerRepository.findAll(options);
   }
 
@@ -90,51 +90,41 @@ export class CustomerService {
   }
 
   async payDebt(customerId: string, amountCents: number, pin: string, operatorId: string) {
+    const managerId = await authService.validateManagerPin(pin);
+
+    if (!managerId) {
+      throw new Error("PIN inválido ou não configurado.");
+    }
+
+    const customer = await customerRepository.findById(customerId);
+
+    if (!customer) {
+      throw new Error("Cliente não encontrado");
+    }
+
+    if (amountCents <= 0 || amountCents > customer.current_debt_cents) {
+      throw new Error(
+        "Valor do pagamento inválido. Deve ser maior que zero e menor ou igual à dívida atual."
+      );
+    }
+
     return prisma.$transaction(async (tx) => {
-      const managers = await tx.user.findMany({
-        where: {
-          deleted_at: null,
-          is_active: true,
-          role: { in: ["admin", "manager"] },
-          pin_hash: { not: null },
-        },
-        select: { pin_hash: true },
-      });
-
-      let hasValidPin = false;
-
-      for (const manager of managers) {
-        if (!manager.pin_hash) {
-          continue;
-        }
-
-        const isMatch = await bcrypt.compare(pin, manager.pin_hash);
-
-        if (isMatch) {
-          hasValidPin = true;
-          break;
-        }
-      }
-
-      if (!hasValidPin) {
-        throw new Error("PIN inválido ou não configurado.");
-      }
-
-      const customer = await tx.customer.findFirst({
+      const customerInTransaction = await tx.customer.findFirst({
         where: { id: customerId, deleted_at: null },
+        select: { id: true, current_debt_cents: true },
       });
 
-      if (!customer) {
+      if (!customerInTransaction) {
         throw new Error("Cliente não encontrado");
       }
 
-      if (amountCents <= 0 || amountCents > customer.current_debt_cents) {
+      if (amountCents <= 0 || amountCents > customerInTransaction.current_debt_cents) {
         throw new Error(
           "Valor do pagamento inválido. Deve ser maior que zero e menor ou igual à dívida atual."
         );
       }
 
-      const debtBeforeCents = customer.current_debt_cents;
+      const debtBeforeCents = customerInTransaction.current_debt_cents;
       const paymentKind = amountCents === debtBeforeCents ? "full" : "partial";
       const newDebt = debtBeforeCents - amountCents;
 
@@ -172,7 +162,7 @@ export class CustomerService {
         data: {
           type: "fiado_payment",
           amount_cents: amountCents,
-          customer_id: customer.id,
+          customer_id: customerInTransaction.id,
           operator_id: operatorId,
           cash_register_id: fallbackOpenCashRegister.id,
           debt_before_cents: debtBeforeCents,

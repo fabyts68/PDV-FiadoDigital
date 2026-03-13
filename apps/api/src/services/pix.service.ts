@@ -10,7 +10,8 @@ export class PixService {
     this.settingsService = new SettingsService();
   }
 
-  async generateQRCode(txId: string, amountCents: number) {
+  async generateQRCode(txId: string | undefined, amountCents: number) {
+    const normalizedTxId = txId?.trim() || `PDV${Date.now().toString(36).toUpperCase()}`;
     // Buscar configurações do banco (prioridade)
     const dbSettings = await this.settingsService.getPixSettings();
 
@@ -55,7 +56,7 @@ export class PixService {
       amount_cents: amountCents,
       merchant_name: merchantName,
       qr_code_payload: payload,
-      tx_id: txId,
+      tx_id: normalizedTxId,
     };
   }
 }

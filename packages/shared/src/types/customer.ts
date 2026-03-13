@@ -20,3 +20,12 @@ export type CreateCustomerPayload = {
   payment_due_day?: number;
   is_active?: boolean;
 };
+
+export interface CustomerQueryParams {
+  search?: string;
+  only_active?: boolean;
+  page: number;
+  per_page: number;
+  sort_by?: "name" | "credit_limit_cents" | "current_debt_cents" | "payment_due_day" | "is_active";
+  sort_order: "asc" | "desc";
+}

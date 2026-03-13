@@ -20,8 +20,26 @@ export class CashRegisterController {
         return;
       }
 
-      const registers = await cashRegisterService.list();
-      res.json({ success: true, data: registers });
+      const page = typeof req.query.page === "number" ? req.query.page : 1;
+      const perPage = typeof req.query.per_page === "number" ? req.query.per_page : 20;
+      const fromDate = req.query.from_date instanceof Date ? req.query.from_date : undefined;
+      const toDate = req.query.to_date instanceof Date ? req.query.to_date : undefined;
+      const statusFilter =
+        typeof req.query.status === "string" && req.query.status !== "open"
+          ? (req.query.status as "open" | "closed")
+          : undefined;
+      const operatorId =
+        typeof req.query.operator_id === "string" ? req.query.operator_id : undefined;
+
+      const result = await cashRegisterService.list({
+        page,
+        per_page: perPage,
+        from_date: fromDate,
+        to_date: toDate,
+        status: statusFilter,
+        operator_id: operatorId,
+      });
+      res.json({ success: true, data: result.data, pagination: result.pagination });
     } catch (error) {
       next(error);
     }
