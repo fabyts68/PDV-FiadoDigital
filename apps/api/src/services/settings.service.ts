@@ -20,6 +20,12 @@ const RECEIPT_FOOTER_SETTING = "receipt_footer";
 const FIADO_MAX_DAYS_SETTING = "fiado_max_days";
 const FIADO_ALLOW_INACTIVE_SETTING = "fiado_allow_inactive";
 const FIADO_BLOCKED_MESSAGE_SETTING = "fiado_blocked_message";
+const STOCK_ALERT_MIN_UNITS_SETTING = "stock_alert_min_units";
+const STOCK_ALERT_MIN_BULK_KG_SETTING = "stock_alert_min_bulk_kg";
+const ALERT_CASH_REGISTER_AMOUNT_SETTING = "cash_register_alert_amount_cents";
+const ALERT_REFUND_LIMIT_SETTING = "refund_alert_limit_cents";
+const FIADO_ALERT_AT_90_PERCENT_SETTING = "fiado_alert_at_90_percent";
+const FIADO_ALERT_ON_DUE_DAY_SETTING = "fiado_alert_on_due_day";
 
 export class SettingsService {
   private settingsRepository: SettingsRepository;
@@ -108,6 +114,13 @@ export class SettingsService {
     fiado_max_days: number;
     fiado_allow_inactive: boolean;
     fiado_blocked_message: string;
+    stock_alert_min_units: number;
+    stock_alert_min_bulk_kg: number;
+    cash_register_alert_amount_cents: number;
+    refund_alert_limit_cents: number;
+    fiado_alert_at_90_percent: boolean;
+    fiado_alert_on_due_day: boolean;
+    stock_alert_type_settings: Record<string, number>;
   }> {
     const keys = [
       DISCOUNT_LIMIT_DAILY_SETTING,
@@ -121,10 +134,31 @@ export class SettingsService {
       FIADO_MAX_DAYS_SETTING,
       FIADO_ALLOW_INACTIVE_SETTING,
       FIADO_BLOCKED_MESSAGE_SETTING,
+      STOCK_ALERT_MIN_UNITS_SETTING,
+      STOCK_ALERT_MIN_BULK_KG_SETTING,
+      ALERT_CASH_REGISTER_AMOUNT_SETTING,
+      ALERT_REFUND_LIMIT_SETTING,
+      FIADO_ALERT_AT_90_PERCENT_SETTING,
+      FIADO_ALERT_ON_DUE_DAY_SETTING,
     ];
 
-    const settings = await this.settingsRepository.findMany(keys);
+    const [settings, stockAlertTypeSettings] = await Promise.all([
+      this.settingsRepository.findMany(keys),
+      this.settingsRepository.findByPrefix("stock_alert_type_"),
+    ]);
     const map = new Map(settings.map((setting) => [setting.key, setting.value]));
+
+    const stockAlertTypeMap: Record<string, number> = {};
+
+    for (const item of stockAlertTypeSettings) {
+      const parsed = Number.parseFloat(item.value);
+
+      if (Number.isNaN(parsed) || parsed < 0) {
+        continue;
+      }
+
+      stockAlertTypeMap[item.key] = parsed;
+    }
 
     return {
       discount_limit_daily: Number.parseInt(map.get(DISCOUNT_LIMIT_DAILY_SETTING) ?? "0", 10) || 0,
@@ -138,6 +172,13 @@ export class SettingsService {
       fiado_max_days: Number.parseInt(map.get(FIADO_MAX_DAYS_SETTING) ?? "0", 10) || 0,
       fiado_allow_inactive: map.get(FIADO_ALLOW_INACTIVE_SETTING) === "true",
       fiado_blocked_message: map.get(FIADO_BLOCKED_MESSAGE_SETTING) ?? "",
+      stock_alert_min_units: Number.parseInt(map.get(STOCK_ALERT_MIN_UNITS_SETTING) ?? "0", 10) || 0,
+      stock_alert_min_bulk_kg: Number.parseFloat(map.get(STOCK_ALERT_MIN_BULK_KG_SETTING) ?? "0") || 0,
+      cash_register_alert_amount_cents: Number.parseInt(map.get(ALERT_CASH_REGISTER_AMOUNT_SETTING) ?? "0", 10) || 0,
+      refund_alert_limit_cents: Number.parseInt(map.get(ALERT_REFUND_LIMIT_SETTING) ?? "50000", 10) || 50000,
+      fiado_alert_at_90_percent: map.get(FIADO_ALERT_AT_90_PERCENT_SETTING) !== "false",
+      fiado_alert_on_due_day: map.get(FIADO_ALERT_ON_DUE_DAY_SETTING) !== "false",
+      stock_alert_type_settings: stockAlertTypeMap,
     };
   }
 
@@ -153,6 +194,13 @@ export class SettingsService {
     fiado_max_days?: number;
     fiado_allow_inactive?: boolean;
     fiado_blocked_message?: string;
+    stock_alert_min_units?: number;
+    stock_alert_min_bulk_kg?: number;
+    cash_register_alert_amount_cents?: number;
+    refund_alert_limit_cents?: number;
+    fiado_alert_at_90_percent?: boolean;
+    fiado_alert_on_due_day?: boolean;
+    stock_alert_type_settings?: Record<string, number>;
   }) {
     const operations: Promise<unknown>[] = [];
 
@@ -215,6 +263,51 @@ export class SettingsService {
 
     if (data.fiado_blocked_message !== undefined) {
       operations.push(this.settingsRepository.upsert(FIADO_BLOCKED_MESSAGE_SETTING, data.fiado_blocked_message));
+    }
+
+    if (data.stock_alert_min_units !== undefined) {
+      operations.push(
+        this.settingsRepository.upsert(STOCK_ALERT_MIN_UNITS_SETTING, String(data.stock_alert_min_units)),
+      );
+    }
+
+    if (data.stock_alert_min_bulk_kg !== undefined) {
+      operations.push(
+        this.settingsRepository.upsert(STOCK_ALERT_MIN_BULK_KG_SETTING, String(data.stock_alert_min_bulk_kg)),
+      );
+    }
+
+    if (data.cash_register_alert_amount_cents !== undefined) {
+      operations.push(
+        this.settingsRepository.upsert(
+          ALERT_CASH_REGISTER_AMOUNT_SETTING,
+          String(data.cash_register_alert_amount_cents),
+        ),
+      );
+    }
+
+    if (data.refund_alert_limit_cents !== undefined) {
+      operations.push(
+        this.settingsRepository.upsert(ALERT_REFUND_LIMIT_SETTING, String(data.refund_alert_limit_cents)),
+      );
+    }
+
+    if (data.fiado_alert_at_90_percent !== undefined) {
+      operations.push(
+        this.settingsRepository.upsert(FIADO_ALERT_AT_90_PERCENT_SETTING, String(data.fiado_alert_at_90_percent)),
+      );
+    }
+
+    if (data.fiado_alert_on_due_day !== undefined) {
+      operations.push(
+        this.settingsRepository.upsert(FIADO_ALERT_ON_DUE_DAY_SETTING, String(data.fiado_alert_on_due_day)),
+      );
+    }
+
+    if (data.stock_alert_type_settings) {
+      for (const [key, threshold] of Object.entries(data.stock_alert_type_settings)) {
+        operations.push(this.settingsRepository.upsert(key, String(threshold)));
+      }
     }
 
     await Promise.all(operations);

@@ -1,25 +1,121 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, onMounted, onUnmounted, watch } from "vue";
+import { useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth.store.js";
 import { useWebSocket } from "@/composables/use-websocket.js";
 import { useLayoutState } from "@/composables/use-layout-state.js";
 import { useAuth } from "@/composables/use-auth.js";
+import { useNotifications } from "@/composables/use-notifications.js";
+import type { Notification } from "@pdv/shared";
 
 const auth = useAuthStore();
 const { logout } = useAuth();
+const router = useRouter();
 const loggingOut = ref(false);
 const { isOnline } = useWebSocket();
 const { openMobileMenu } = useLayoutState();
+const {
+  unreadCount,
+  recentNotifications,
+  fetchUnreadCount,
+  fetchRecentNotifications,
+  markAsRead,
+  markAllRead,
+  initWsWatcher,
+  startPolling,
+  stopPolling,
+} = useNotifications();
+
+const showPanel = ref(false);
 
 async function handleLogout(): Promise<void> {
   loggingOut.value = true;
-
   try {
     await logout();
   } finally {
     loggingOut.value = false;
   }
 }
+
+function toggleNotificationPanel(): void {
+  showPanel.value = !showPanel.value;
+  if (showPanel.value) {
+    fetchRecentNotifications();
+  }
+}
+
+function closePanel(): void {
+  showPanel.value = false;
+}
+
+async function handleMarkAllRead(): Promise<void> {
+  await markAllRead();
+}
+
+async function navigateTo(notification: Notification): Promise<void> {
+  closePanel();
+  await markAsRead(notification.id);
+  try {
+    const meta = notification.meta
+      ? (JSON.parse(notification.meta) as { redirectPath?: string })
+      : null;
+    if (meta?.redirectPath) {
+      await router.push(meta.redirectPath);
+    }
+  } catch {
+    // meta inválida — ignora redirect
+  }
+}
+
+function severityIconClass(severity: Notification["severity"]): string {
+  if (severity === "critical") return "text-danger";
+  if (severity === "high") return "text-warning";
+  if (severity === "medium") return "text-primary";
+  return "text-gray-400";
+}
+
+function formatRelativeTime(isoDate: string): string {
+  const diffMs = Date.now() - new Date(isoDate).getTime();
+  const diffMin = Math.floor(diffMs / 60_000);
+  if (diffMin < 1) return "agora mesmo";
+  if (diffMin < 60) return `há ${diffMin} min`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `há ${diffH}h`;
+  return `há ${Math.floor(diffH / 24)}d`;
+}
+
+function handleClickOutside(event: MouseEvent): void {
+  const target = event.target as HTMLElement;
+  if (!target.closest("[data-notification-panel]")) {
+    closePanel();
+  }
+}
+
+onMounted(async () => {
+  initWsWatcher();
+  await fetchUnreadCount();
+
+  if (!isOnline.value) {
+    startPolling();
+  }
+
+  document.addEventListener("click", handleClickOutside);
+});
+
+watch(isOnline, async (online) => {
+  if (!online) {
+    startPolling();
+    return;
+  }
+
+  stopPolling();
+  await fetchUnreadCount();
+});
+
+onUnmounted(() => {
+  stopPolling();
+  document.removeEventListener("click", handleClickOutside);
+});
 </script>
 
 <template>
@@ -45,6 +141,82 @@ async function handleLogout(): Promise<void> {
       >
         <span>⚠️</span>
         <span>Servidor indisponível</span>
+      </div>
+
+      <!-- Badge de notificações -->
+      <div class="relative" data-notification-panel>
+        <button
+          type="button"
+          :aria-label="`${unreadCount} notificação${unreadCount !== 1 ? 'ões' : ''} não lida${unreadCount !== 1 ? 's' : ''}`"
+          class="relative flex min-h-11 min-w-11 items-center justify-center rounded-full transition-colors hover:bg-surface"
+          @click.stop="toggleNotificationPanel"
+        >
+          <span class="text-xl">🔔</span>
+          <span
+            v-if="unreadCount > 0"
+            aria-hidden="true"
+            class="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold leading-none text-white ring-2 ring-white"
+          >
+            {{ unreadCount > 99 ? "99+" : unreadCount }}
+          </span>
+        </button>
+
+        <!-- Dropdown de prévia -->
+        <div
+          v-if="showPanel"
+          role="region"
+          aria-label="Notificações recentes"
+          class="absolute right-0 top-full z-50 mt-2 w-80 rounded-lg border bg-white shadow-lg"
+        >
+          <div class="flex items-center justify-between border-b px-4 py-2">
+            <span class="text-sm font-semibold">Notificações</span>
+            <button
+              type="button"
+              class="text-xs text-primary hover:underline focus:outline-none"
+              @click="handleMarkAllRead"
+            >
+              Marcar tudo como lido
+            </button>
+          </div>
+
+          <ul
+            v-if="recentNotifications.length > 0"
+            class="max-h-72 divide-y overflow-y-auto"
+            role="list"
+          >
+            <li
+              v-for="notification in recentNotifications"
+              :key="notification.id"
+              role="listitem"
+              class="cursor-pointer px-4 py-3 transition-colors hover:bg-surface"
+              :class="{ 'font-semibold': !notification.read_at }"
+              @click="navigateTo(notification)"
+            >
+              <div class="flex items-start gap-2">
+                <span :class="['text-sm', severityIconClass(notification.severity)]">●</span>
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-sm">{{ notification.title }}</p>
+                  <p class="line-clamp-2 text-xs text-gray-500">{{ notification.message }}</p>
+                  <p class="mt-1 text-xs text-gray-400">{{ formatRelativeTime(notification.created_at) }}</p>
+                </div>
+              </div>
+            </li>
+          </ul>
+
+          <p v-else class="px-4 py-6 text-center text-sm text-gray-500">
+            Nenhuma notificação recente.
+          </p>
+
+          <div class="border-t px-4 py-2 text-center">
+            <RouterLink
+              to="/notifications"
+              class="text-xs text-primary hover:underline"
+              @click="closePanel"
+            >
+              Ver todas as notificações
+            </RouterLink>
+          </div>
+        </div>
       </div>
 
       <span class="text-sm text-gray-600">

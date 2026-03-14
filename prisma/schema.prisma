@@ -328,3 +328,20 @@ model Settings {
 
   @@map("settings")
 }
+
+model Notification {
+  id              String    @id @default(uuid())
+  type            String    // ex: "stock.low", "discount.limit", "fiado.limit", "refund.critical"
+  severity        String    // "critical" | "high" | "medium" | "info"
+  title           String
+  message         String
+  meta            String?   // JSON serializado — ex: { productId, saleId, customerId, redirectPath }
+  target_roles    String    // JSON serializado — ex: ["admin", "manager"]
+  read_at         DateTime?
+  acknowledged_by String?   // user_id de quem confirmou
+  created_at      DateTime  @default(now())
+
+  @@index([severity, created_at])
+  @@index([read_at, created_at])
+  @@map("notifications")
+}

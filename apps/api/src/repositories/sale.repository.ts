@@ -122,6 +122,7 @@ export class SaleRepository {
         select: {
           id: true,
           name: true,
+          product_type_id: true,
           is_bulk: true,
           stock_quantity: true,
           min_stock_alert: true,
@@ -131,6 +132,7 @@ export class SaleRepository {
       const productMap = new Map(products.map((product) => [product.id, product]));
 
       const lowStockProducts = [];
+      const affectedTypeIds = new Set<string>();
 
       for (const item of payload.items) {
         const product = productMap.get(item.product_id);
@@ -157,6 +159,10 @@ export class SaleRepository {
         }
 
         const newStockQuantity = product.stock_quantity - requiredQuantity;
+
+        if (product.product_type_id) {
+          affectedTypeIds.add(product.product_type_id);
+        }
 
         await tx.product.update({
           where: { id: item.product_id },
@@ -209,7 +215,11 @@ export class SaleRepository {
       }
 
       // Retornar venda com informações de estoque baixo
-      return { sale, lowStockProducts };
+      return {
+        sale,
+        lowStockProducts,
+        affectedProductTypeIds: Array.from(affectedTypeIds),
+      };
     });
   }
 
@@ -463,5 +473,63 @@ export class SaleRepository {
         },
       });
     });
+  }
+
+  async getCashDiscountTotalByPeriod(period: "daily" | "weekly" | "monthly", referenceDate = new Date()) {
+    const { start, end } = this.resolvePeriodRange(period, referenceDate);
+
+    const result = await prisma.sale.aggregate({
+      where: {
+        deleted_at: null,
+        status: "completed",
+        discount_cents: { gt: 0 },
+        created_at: {
+          gte: start,
+          lte: end,
+        },
+        OR: [
+          { payment_method: PAYMENT_METHODS.CASH },
+          { payments: { some: { method: PAYMENT_METHODS.CASH } } },
+        ],
+      },
+      _sum: {
+        discount_cents: true,
+      },
+    });
+
+    return result._sum.discount_cents ?? 0;
+  }
+
+  private resolvePeriodRange(period: "daily" | "weekly" | "monthly", referenceDate: Date) {
+    const start = new Date(referenceDate);
+    start.setHours(0, 0, 0, 0);
+
+    if (period === "weekly") {
+      const day = start.getDay();
+      const diffToMonday = day === 0 ? 6 : day - 1;
+      start.setDate(start.getDate() - diffToMonday);
+    }
+
+    if (period === "monthly") {
+      start.setDate(1);
+    }
+
+    const end = new Date(start);
+
+    if (period === "daily") {
+      end.setDate(start.getDate() + 1);
+      end.setMilliseconds(end.getMilliseconds() - 1);
+      return { start, end };
+    }
+
+    if (period === "weekly") {
+      end.setDate(start.getDate() + 7);
+      end.setMilliseconds(end.getMilliseconds() - 1);
+      return { start, end };
+    }
+
+    end.setMonth(start.getMonth() + 1);
+    end.setMilliseconds(end.getMilliseconds() - 1);
+    return { start, end };
   }
 }

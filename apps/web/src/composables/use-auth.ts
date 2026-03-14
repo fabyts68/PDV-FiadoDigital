@@ -25,16 +25,23 @@ export function useAuth() {
       body: JSON.stringify({ username, password }),
     });
 
-    const data = await response.json();
+    // Guard against empty or non-JSON responses (e.g. proxy 502 with no body)
+    // to prevent raw SyntaxError from surfacing to the user.
+    let data: { success?: boolean; data?: { accessToken: string; user: { role: Role } }; message?: string };
+    try {
+      data = await response.json();
+    } catch {
+      throw new Error("Servidor indisponível. Aguarde o retorno da conexão.");
+    }
 
     if (!response.ok) {
       throw new Error(data.message ?? "Erro ao fazer login");
     }
 
-    auth.setAuth(data.data.accessToken, data.data.user);
+    auth.setAuth(data.data!.accessToken, data.data!.user);
 
     // Redirecionar ao cargo do usuário
-    const defaultRoute = getDefaultRouteByRole(data.data.user.role);
+    const defaultRoute = getDefaultRouteByRole(data.data!.user.role);
     router.push({ name: defaultRoute });
   }
 
@@ -67,16 +74,19 @@ export function useAuth() {
       credentials: "include",
     });
 
-    const data = await response.json();
-
     if (!response.ok) {
       auth.clearAuth();
       router.push({ name: "login" });
       return;
     }
 
-    if (data.data?.accessToken && auth.user) {
-      auth.setAuth(data.data.accessToken, auth.user);
+    try {
+      const data = await response.json();
+      if (data.data?.accessToken && auth.user) {
+        auth.setAuth(data.data.accessToken, auth.user);
+      }
+    } catch {
+      // Token não pôde ser renovado silenciosamente; mantém sessão atual
     }
   }
 

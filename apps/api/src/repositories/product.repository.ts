@@ -295,4 +295,116 @@ export class ProductRepository {
       data: { deleted_at: new Date() },
     });
   }
+
+  async getTypeStockSnapshot() {
+    const rows = await prisma.product.findMany({
+      where: {
+        deleted_at: null,
+        product_type_id: {
+          not: null,
+        },
+        product_type: {
+          is: {
+            deleted_at: null,
+          },
+        },
+      },
+      select: {
+        stock_quantity: true,
+        is_bulk: true,
+        product_type: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    const typeMap = new Map<string, { id: string; name: string; total: number; allBulk: boolean }>();
+
+    for (const row of rows) {
+      if (!row.product_type) {
+        continue;
+      }
+
+      const current = typeMap.get(row.product_type.id);
+
+      if (!current) {
+        typeMap.set(row.product_type.id, {
+          id: row.product_type.id,
+          name: row.product_type.name,
+          total: row.stock_quantity,
+          allBulk: row.is_bulk,
+        });
+        continue;
+      }
+
+      current.total += row.stock_quantity;
+
+      if (!row.is_bulk) {
+        current.allBulk = false;
+      }
+    }
+
+    return Array.from(typeMap.values());
+  }
+
+  async getTypeStockSnapshotByIds(typeIds: string[]) {
+    if (typeIds.length === 0) {
+      return [];
+    }
+
+    const rows = await prisma.product.findMany({
+      where: {
+        deleted_at: null,
+        product_type_id: {
+          in: typeIds,
+        },
+        product_type: {
+          is: {
+            deleted_at: null,
+          },
+        },
+      },
+      select: {
+        stock_quantity: true,
+        is_bulk: true,
+        product_type: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    const typeMap = new Map<string, { id: string; name: string; total: number; allBulk: boolean }>();
+
+    for (const row of rows) {
+      if (!row.product_type) {
+        continue;
+      }
+
+      const current = typeMap.get(row.product_type.id);
+
+      if (!current) {
+        typeMap.set(row.product_type.id, {
+          id: row.product_type.id,
+          name: row.product_type.name,
+          total: row.stock_quantity,
+          allBulk: row.is_bulk,
+        });
+        continue;
+      }
+
+      current.total += row.stock_quantity;
+
+      if (!row.is_bulk) {
+        current.allBulk = false;
+      }
+    }
+
+    return Array.from(typeMap.values());
+  }
 }

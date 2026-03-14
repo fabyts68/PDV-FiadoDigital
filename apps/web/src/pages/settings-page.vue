@@ -67,6 +67,24 @@ interface GeneralSettingsResponse {
   fiado_max_days: number;
   fiado_allow_inactive: boolean;
   fiado_blocked_message: string;
+  stock_alert_min_units: number;
+  stock_alert_min_bulk_kg: number;
+  cash_register_alert_amount_cents: number;
+  refund_alert_limit_cents: number;
+  fiado_alert_at_90_percent: boolean;
+  fiado_alert_on_due_day: boolean;
+  stock_alert_type_settings: Record<string, number>;
+  stock_alert_type_pct_settings?: Record<string, number>;
+}
+
+interface ProductTypeOption {
+  id: string;
+  name: string;
+}
+
+interface ProductStockUnitInfo {
+  product_type_id: string | null;
+  is_bulk: boolean;
 }
 
 const { authenticatedFetch } = useApi();
@@ -98,6 +116,8 @@ const generalSettingsSaving = ref(false);
 const generalSettingsError = ref<string | null>(null);
 const systemSubmitError = ref<string | null>(null);
 const fiadoSubmitError = ref<string | null>(null);
+const alertsSaving = ref(false);
+const alertsSubmitError = ref<string | null>(null);
 
 const systemForm = ref({
   store_name: "",
@@ -115,6 +135,24 @@ const fiadoForm = ref({
   fiado_allow_inactive: false,
   fiado_blocked_message: "",
 });
+
+const alertsForm = ref({
+  stock_alert_min_units: "",
+  stock_alert_min_bulk_kg: "",
+  cash_register_alert_amount_cents: "",
+  refund_alert_limit_cents: "",
+  fiado_alert_at_90_percent: true,
+  fiado_alert_on_due_day: true,
+});
+
+const alertTypeLimitForm = ref<Record<string, string>>({});
+const alertTypePctLimitForm = ref<Record<string, string>>({});
+const alertTypesSortColumn = ref<"name" | "limit_qty" | "limit_pct" | null>(null);
+const alertTypesSortOrder = ref<"asc" | "desc">("asc");
+const alertTypesCurrentPage = ref(1);
+const ALERT_TYPES_PAGE_SIZE = 5;
+const alertProductTypes = ref<ProductTypeOption[]>([]);
+const alertTypeUnitMap = ref<Record<string, "un" | "kg">>({});
 
 const showPasswordModal = ref(false);
 const confirmationPassword = ref("");
@@ -221,6 +259,7 @@ const pixKeyStorageHint = computed(() => {
 });
 
 onMounted(async () => {
+  await loadAlertTypeMetadata();
   await loadGeneralSettings();
   await loadPixSettings();
   await loadCardMachines();
@@ -452,6 +491,26 @@ function handleFiadoMaxDaysInput(event: Event): void {
   fiadoForm.value.fiado_max_days = target.value.replace(/\D/g, "");
 }
 
+function handleAlertStockMinUnitsInput(event: Event): void {
+  const target = event.target as HTMLInputElement;
+  alertsForm.value.stock_alert_min_units = target.value.replace(/\D/g, "");
+}
+
+function handleAlertStockMinBulkKgInput(event: Event): void {
+  const target = event.target as HTMLInputElement;
+  alertsForm.value.stock_alert_min_bulk_kg = toWeightMaskedValue(target.value);
+}
+
+function handleAlertCashRegisterInput(event: Event): void {
+  const target = event.target as HTMLInputElement;
+  alertsForm.value.cash_register_alert_amount_cents = toCurrencyMaskedValue(target.value);
+}
+
+function handleAlertRefundLimitInput(event: Event): void {
+  const target = event.target as HTMLInputElement;
+  alertsForm.value.refund_alert_limit_cents = toCurrencyMaskedValue(target.value);
+}
+
 function toCurrencyMaskedValue(rawValue: string): string {
   const digits = rawValue.replace(/\D/g, "");
 
@@ -468,6 +527,167 @@ function toNullableCents(rawValue: string): number | undefined {
   }
 
   return parseCurrencyInputToCents(rawValue);
+}
+
+function toWeightMaskedValue(rawValue: string): string {
+  const digits = rawValue.replace(/\D/g, "");
+
+  if (!digits) {
+    return "";
+  }
+
+  const kilograms = Number.parseInt(digits, 10) / 1000;
+  return kilograms.toLocaleString("pt-BR", {
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  });
+}
+
+function toNullableKg(rawValue: string): number | undefined {
+  const normalized = rawValue.trim();
+
+  if (!normalized) {
+    return undefined;
+  }
+
+  const parsed = Number.parseFloat(normalized.replace(/\./g, "").replace(",", "."));
+
+  if (Number.isNaN(parsed)) {
+    return undefined;
+  }
+
+  return parsed;
+}
+
+function handleTypeLimitInput(productTypeId: string, unit: "un" | "kg", event: Event): void {
+  const target = event.target as HTMLInputElement;
+
+  if (unit === "kg") {
+    alertTypeLimitForm.value[productTypeId] = toWeightMaskedValue(target.value);
+    return;
+  }
+
+  alertTypeLimitForm.value[productTypeId] = target.value.replace(/\D/g, "");
+}
+
+const sortedAlertProductTypes = computed(() => {
+  const base = [...alertProductTypes.value];
+  const column = alertTypesSortColumn.value;
+
+  if (!column) {
+    return base.sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
+  }
+
+  return base.sort((a, b) => {
+    let valA: string | number;
+    let valB: string | number;
+
+    if (column === "name") {
+      valA = a.name.toLowerCase();
+      valB = b.name.toLowerCase();
+    } else if (column === "limit_qty") {
+      valA = Number(alertTypeLimitForm.value[a.id]?.replace(/[^\d]/g, "") || 0);
+      valB = Number(alertTypeLimitForm.value[b.id]?.replace(/[^\d]/g, "") || 0);
+    } else {
+      valA = Number(alertTypePctLimitForm.value[a.id] || 0);
+      valB = Number(alertTypePctLimitForm.value[b.id] || 0);
+    }
+
+    const direction = alertTypesSortOrder.value === "asc" ? 1 : -1;
+    return valA > valB ? direction : valA < valB ? -direction : 0;
+  });
+});
+
+const totalAlertTypePages = computed(() =>
+  Math.max(1, Math.ceil(alertProductTypes.value.length / ALERT_TYPES_PAGE_SIZE)),
+);
+
+const paginatedAlertProductTypes = computed(() => {
+  const start = (alertTypesCurrentPage.value - 1) * ALERT_TYPES_PAGE_SIZE;
+  return sortedAlertProductTypes.value.slice(start, start + ALERT_TYPES_PAGE_SIZE);
+});
+
+function getTypeUnit(productTypeId: string): "un" | "kg" {
+  return alertTypeUnitMap.value[productTypeId] ?? "un";
+}
+
+function toggleAlertTypesSort(column: "name" | "limit_qty" | "limit_pct"): void {
+  if (alertTypesSortColumn.value === column) {
+    alertTypesSortOrder.value = alertTypesSortOrder.value === "asc" ? "desc" : "asc";
+  } else {
+    alertTypesSortColumn.value = column;
+    alertTypesSortOrder.value = "asc";
+  }
+  alertTypesCurrentPage.value = 1;
+}
+
+function handleTypePctInput(productTypeId: string, event: Event): void {
+  const target = event.target as HTMLInputElement;
+  const raw = target.value.replace(/\D/g, "");
+  const parsed = Number.parseInt(raw, 10);
+  alertTypePctLimitForm.value[productTypeId] = Number.isNaN(parsed) ? "" : String(Math.min(100, parsed));
+}
+
+async function loadAlertTypeMetadata(): Promise<void> {
+  try {
+    const typeResponse = await authenticatedFetch("/api/product-types");
+    const typeData = await typeResponse.json();
+
+    if (typeResponse.ok) {
+      alertProductTypes.value = (typeData.data || []) as ProductTypeOption[];
+    }
+
+    const products: ProductStockUnitInfo[] = [];
+    let page = 1;
+    let totalPages = 1;
+
+    while (page <= totalPages) {
+      const productsResponse = await authenticatedFetch(`/api/products?per_page=100&page=${page}`);
+      const productsData = await productsResponse.json();
+
+      if (!productsResponse.ok) {
+        break;
+      }
+
+      const pageData = (productsData.data || []) as ProductStockUnitInfo[];
+      products.push(...pageData);
+
+      totalPages = Number.parseInt(String(productsData.pagination?.total_pages || 1), 10) || 1;
+      page += 1;
+    }
+
+    const allBulkMap: Record<string, boolean> = {};
+    const hasAnyProductMap: Record<string, boolean> = {};
+
+    for (const product of products) {
+      if (!product.product_type_id) {
+        continue;
+      }
+
+      hasAnyProductMap[product.product_type_id] = true;
+
+      if (allBulkMap[product.product_type_id] === undefined) {
+        allBulkMap[product.product_type_id] = true;
+      }
+
+      if (!product.is_bulk) {
+        allBulkMap[product.product_type_id] = false;
+      }
+    }
+
+    const nextUnitMap: Record<string, "un" | "kg"> = {};
+
+    for (const productType of alertProductTypes.value) {
+      const hasProducts = hasAnyProductMap[productType.id] === true;
+      const isAllBulk = allBulkMap[productType.id] === true;
+      nextUnitMap[productType.id] = hasProducts && isAllBulk ? "kg" : "un";
+    }
+
+    alertTypeUnitMap.value = nextUnitMap;
+  } catch {
+    alertProductTypes.value = [];
+    alertTypeUnitMap.value = {};
+  }
 }
 
 async function loadGeneralSettings(): Promise<void> {
@@ -501,6 +721,40 @@ async function loadGeneralSettings(): Promise<void> {
       fiado_allow_inactive: settings.fiado_allow_inactive,
       fiado_blocked_message: settings.fiado_blocked_message || "",
     };
+
+    alertsForm.value = {
+      stock_alert_min_units: settings.stock_alert_min_units > 0 ? String(settings.stock_alert_min_units) : "",
+      stock_alert_min_bulk_kg: settings.stock_alert_min_bulk_kg > 0 ? toWeightMaskedValue(String(Math.round(settings.stock_alert_min_bulk_kg * 1000))) : "",
+      cash_register_alert_amount_cents: settings.cash_register_alert_amount_cents > 0 ? toCurrencyMaskedValue(String(settings.cash_register_alert_amount_cents)) : "",
+      refund_alert_limit_cents: settings.refund_alert_limit_cents > 0 ? toCurrencyMaskedValue(String(settings.refund_alert_limit_cents)) : "",
+      fiado_alert_at_90_percent: settings.fiado_alert_at_90_percent,
+      fiado_alert_on_due_day: settings.fiado_alert_on_due_day,
+    };
+
+    const nextTypeLimits: Record<string, string> = {};
+
+    for (const [key, value] of Object.entries(settings.stock_alert_type_settings || {})) {
+      const productTypeId = key.replace("stock_alert_type_", "");
+      const typeUnit = getTypeUnit(productTypeId);
+
+      if (typeUnit === "kg") {
+        nextTypeLimits[productTypeId] = toWeightMaskedValue(String(Math.round(value * 1000)));
+        continue;
+      }
+
+      nextTypeLimits[productTypeId] = String(Math.trunc(value));
+    }
+
+    alertTypeLimitForm.value = nextTypeLimits;
+
+    const nextTypePctLimits: Record<string, string> = {};
+
+    for (const [key, value] of Object.entries(settings.stock_alert_type_pct_settings || {})) {
+      const productTypeId = key.replace("stock_alert_type_pct_", "");
+      nextTypePctLimits[productTypeId] = String(Math.trunc(value));
+    }
+
+    alertTypePctLimitForm.value = nextTypePctLimits;
   } catch {
     generalSettingsError.value = "Erro de conexão ao carregar configurações gerais.";
   } finally {
@@ -580,6 +834,107 @@ async function saveFiadoSettings(): Promise<void> {
     fiadoSubmitError.value = "Erro de conexão ao salvar configurações de fiado.";
   } finally {
     generalSettingsSaving.value = false;
+  }
+}
+
+async function saveAlertsSettings(): Promise<void> {
+  alertsSaving.value = true;
+  alertsSubmitError.value = null;
+
+  const stockMinUnits = alertsForm.value.stock_alert_min_units
+    ? Number.parseInt(alertsForm.value.stock_alert_min_units, 10)
+    : 0;
+  const stockMinBulkKg = toNullableKg(alertsForm.value.stock_alert_min_bulk_kg) ?? 0;
+
+  if (Number.isNaN(stockMinUnits) || stockMinUnits < 0) {
+    alertsSubmitError.value = "Informe uma quantidade mínima de estoque válida.";
+    alertsSaving.value = false;
+    return;
+  }
+
+  if (Number.isNaN(stockMinBulkKg) || stockMinBulkKg < 0) {
+    alertsSubmitError.value = "Informe um limite válido para produtos a granel.";
+    alertsSaving.value = false;
+    return;
+  }
+
+  const stockTypePayload: Record<string, number> = {};
+
+  for (const [productTypeId, rawValue] of Object.entries(alertTypeLimitForm.value)) {
+    const trimmed = rawValue.trim();
+
+    if (!trimmed) {
+      continue;
+    }
+
+    const typeUnit = getTypeUnit(productTypeId);
+
+    if (typeUnit === "kg") {
+      const parsedKg = toNullableKg(trimmed);
+
+      if (parsedKg === undefined || Number.isNaN(parsedKg) || parsedKg < 0) {
+        continue;
+      }
+
+      stockTypePayload[`stock_alert_type_${productTypeId}`] = parsedKg;
+      continue;
+    }
+
+    const parsedUnits = Number.parseInt(trimmed, 10);
+
+    if (Number.isNaN(parsedUnits) || parsedUnits < 0) {
+      continue;
+    }
+
+    stockTypePayload[`stock_alert_type_${productTypeId}`] = parsedUnits;
+  }
+
+  const stockTypePctPayload: Record<string, number> = {};
+
+  for (const [productTypeId, rawValue] of Object.entries(alertTypePctLimitForm.value)) {
+    const trimmed = rawValue.trim();
+
+    if (!trimmed) {
+      continue;
+    }
+
+    const parsed = Number.parseInt(trimmed, 10);
+
+    if (Number.isNaN(parsed) || parsed < 0 || parsed > 100) {
+      continue;
+    }
+
+    stockTypePctPayload[`stock_alert_type_pct_${productTypeId}`] = parsed;
+  }
+
+  try {
+    const response = await authenticatedFetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        stock_alert_min_units: stockMinUnits,
+        stock_alert_min_bulk_kg: stockMinBulkKg,
+        cash_register_alert_amount_cents: toNullableCents(alertsForm.value.cash_register_alert_amount_cents) ?? 0,
+        refund_alert_limit_cents: toNullableCents(alertsForm.value.refund_alert_limit_cents) ?? 50000,
+        fiado_alert_at_90_percent: alertsForm.value.fiado_alert_at_90_percent,
+        fiado_alert_on_due_day: alertsForm.value.fiado_alert_on_due_day,
+        ...stockTypePayload,
+        ...stockTypePctPayload,
+      }),
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      alertsSubmitError.value = data.message || "Não foi possível salvar as configurações de alertas.";
+      return;
+    }
+
+    showSuccessToast("Configurações de alertas salvas com sucesso!");
+    await loadGeneralSettings();
+  } catch {
+    alertsSubmitError.value = "Erro de conexão ao salvar configurações de alertas.";
+  } finally {
+    alertsSaving.value = false;
   }
 }
 
@@ -1567,6 +1922,224 @@ function changePaymentTab(tab: PaymentTabKey): void {
                   :disabled="generalSettingsSaving"
                 >
                   {{ generalSettingsSaving ? "Salvando..." : "Salvar Configurações de Fiado" }}
+                </button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <section
+          v-if="activeMainTab === 'settings'"
+          class="mt-6"
+        >
+          <div class="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+            <h2 class="text-2xl font-bold text-gray-900">Alertas e Notificações</h2>
+            <p class="mt-1 text-sm text-gray-600">Limites que disparam alertas automáticos para a equipe.</p>
+
+            <p v-if="alertsSubmitError" class="mt-4 rounded bg-red-100 p-3 text-sm text-danger" role="alert">
+              {{ alertsSubmitError }}
+            </p>
+
+            <form class="mt-6 space-y-6" @submit.prevent="saveAlertsSettings">
+              <div class="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label for="stock_alert_min_units" class="mb-1 block text-sm font-medium text-gray-700">
+                    Estoque mínimo - produtos unitários
+                  </label>
+                  <input
+                    id="stock_alert_min_units"
+                    :value="alertsForm.stock_alert_min_units"
+                    type="text"
+                    inputmode="numeric"
+                    placeholder="Ex: 5"
+                    class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    @input="handleAlertStockMinUnitsInput"
+                  />
+                  <p class="mt-1 text-xs text-gray-500">
+                    Quantidade abaixo da qual um alerta de estoque baixo é gerado (fallback global).
+                  </p>
+                </div>
+
+                <div>
+                  <label for="stock_alert_min_bulk_kg" class="mb-1 block text-sm font-medium text-gray-700">
+                    Estoque mínimo - produtos a granel (kg)
+                  </label>
+                  <input
+                    id="stock_alert_min_bulk_kg"
+                    :value="alertsForm.stock_alert_min_bulk_kg"
+                    type="text"
+                    inputmode="numeric"
+                    placeholder="0,000"
+                    class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    @input="handleAlertStockMinBulkKgInput"
+                  />
+                  <p class="mt-1 text-xs text-gray-500">
+                    Limite global para produtos a granel com precisão de 3 casas decimais.
+                  </p>
+                </div>
+
+                <div>
+                  <label for="cash_register_alert_amount_cents" class="mb-1 block text-sm font-medium text-gray-700">
+                    Alerta de caixa (valor em R$)
+                  </label>
+                  <input
+                    id="cash_register_alert_amount_cents"
+                    :value="alertsForm.cash_register_alert_amount_cents"
+                    type="text"
+                    inputmode="numeric"
+                    placeholder="R$ 0,00"
+                    class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    @input="handleAlertCashRegisterInput"
+                  />
+                  <p class="mt-1 text-xs text-gray-500">
+                    Saldo do caixa abaixo deste valor dispara alerta para o gerente.
+                  </p>
+                </div>
+
+                <div>
+                  <label for="refund_alert_limit_cents" class="mb-1 block text-sm font-medium text-gray-700">
+                    Limite para alerta de estorno (R$)
+                  </label>
+                  <input
+                    id="refund_alert_limit_cents"
+                    :value="alertsForm.refund_alert_limit_cents"
+                    type="text"
+                    inputmode="numeric"
+                    placeholder="R$ 500,00"
+                    class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    @input="handleAlertRefundLimitInput"
+                  />
+                  <p class="mt-1 text-xs text-gray-500">
+                    Estornos acima deste valor geram notificação crítica no dashboard gerencial.
+                  </p>
+                </div>
+              </div>
+
+              <div class="rounded-lg border border-gray-200 p-4">
+                <h3 class="text-sm font-semibold text-gray-800">Alertas por Tipo de Produto</h3>
+                <p class="mt-1 text-xs text-gray-500">
+                  Defina limites acumulados por tipo. A unidade é definida automaticamente com base no cadastro atual.
+                </p>
+
+                <div class="mt-4 overflow-x-auto">
+                  <table class="w-full min-w-[640px]">
+                    <thead>
+                      <tr class="border-b border-gray-200 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        <th class="cursor-pointer select-none px-2 py-2" @click="toggleAlertTypesSort('name')">
+                          Tipo
+                          <span :class="alertTypesSortColumn === 'name' ? 'text-primary' : 'text-gray-400'">
+                            {{ alertTypesSortColumn === 'name' ? (alertTypesSortOrder === 'asc' ? '↑' : '↓') : '↕' }}
+                          </span>
+                        </th>
+                        <th class="cursor-pointer select-none px-2 py-2" @click="toggleAlertTypesSort('limit_qty')">
+                          Limite mín. qtd.
+                          <span :class="alertTypesSortColumn === 'limit_qty' ? 'text-primary' : 'text-gray-400'">
+                            {{ alertTypesSortColumn === 'limit_qty' ? (alertTypesSortOrder === 'asc' ? '↑' : '↓') : '↕' }}
+                          </span>
+                        </th>
+                        <th class="cursor-pointer select-none px-2 py-2" @click="toggleAlertTypesSort('limit_pct')">
+                          Limite mín. %
+                          <span :class="alertTypesSortColumn === 'limit_pct' ? 'text-primary' : 'text-gray-400'">
+                            {{ alertTypesSortColumn === 'limit_pct' ? (alertTypesSortOrder === 'asc' ? '↑' : '↓') : '↕' }}
+                          </span>
+                        </th>
+                        <th class="px-2 py-2">Unidade</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr
+                        v-for="productType in paginatedAlertProductTypes"
+                        :key="productType.id"
+                        class="border-b border-gray-100"
+                      >
+                        <td class="px-2 py-2 text-sm text-gray-800">{{ productType.name }}</td>
+                        <td class="px-2 py-2">
+                          <input
+                            :id="`stock_alert_type_${productType.id}`"
+                            :value="alertTypeLimitForm[productType.id] || ''"
+                            type="text"
+                            inputmode="numeric"
+                            :placeholder="getTypeUnit(productType.id) === 'kg' ? '0,000' : '0'"
+                            class="w-28 rounded border border-gray-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                            @input="(event) => handleTypeLimitInput(productType.id, getTypeUnit(productType.id), event)"
+                          />
+                        </td>
+                        <td class="px-2 py-2">
+                          <div class="flex items-center gap-1">
+                            <input
+                              :id="`stock_alert_type_pct_${productType.id}`"
+                              :value="alertTypePctLimitForm[productType.id] || ''"
+                              type="text"
+                              inputmode="numeric"
+                              placeholder="0"
+                              class="w-16 rounded border border-gray-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                              @input="(event) => handleTypePctInput(productType.id, event)"
+                            />
+                            <span class="text-sm text-gray-500">%</span>
+                          </div>
+                        </td>
+                        <td class="px-2 py-2 text-sm text-gray-600">{{ getTypeUnit(productType.id) }}</td>
+                      </tr>
+                      <tr v-if="paginatedAlertProductTypes.length === 0">
+                        <td colspan="4" class="px-2 py-3 text-sm text-gray-500">
+                          Nenhum tipo de produto cadastrado.
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div v-if="totalAlertTypePages > 1" class="mt-3 flex items-center justify-end gap-3">
+                  <button
+                    type="button"
+                    class="rounded border border-gray-300 px-3 py-1 text-sm text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    :disabled="alertTypesCurrentPage === 1"
+                    @click="alertTypesCurrentPage--"
+                  >
+                    ← Anterior
+                  </button>
+                  <span class="text-xs text-gray-500">Página {{ alertTypesCurrentPage }} de {{ totalAlertTypePages }}</span>
+                  <button
+                    type="button"
+                    class="rounded border border-gray-300 px-3 py-1 text-sm text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    :disabled="alertTypesCurrentPage >= totalAlertTypePages"
+                    @click="alertTypesCurrentPage++"
+                  >
+                    Próxima →
+                  </button>
+                </div>
+              </div>
+
+              <div class="rounded-lg border border-gray-200 p-4">
+                <h3 class="text-sm font-semibold text-gray-800">Alertas de Fiado por Cliente</h3>
+                <div class="mt-3 grid gap-3 md:grid-cols-2">
+                  <label class="flex items-center gap-2 text-sm font-medium text-gray-700">
+                    <input
+                      v-model="alertsForm.fiado_alert_at_90_percent"
+                      type="checkbox"
+                      class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary/20"
+                    />
+                    Alerta em 90% do limite de fiado
+                  </label>
+
+                  <label class="flex items-center gap-2 text-sm font-medium text-gray-700">
+                    <input
+                      v-model="alertsForm.fiado_alert_on_due_day"
+                      type="checkbox"
+                      class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary/20"
+                    />
+                    Alerta no dia do vencimento com saldo em aberto
+                  </label>
+                </div>
+              </div>
+
+              <div class="flex justify-end">
+                <button
+                  type="submit"
+                  class="rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark disabled:opacity-50"
+                  :disabled="alertsSaving"
+                >
+                  {{ alertsSaving ? "Salvando..." : "Salvar Configurações de Alertas" }}
                 </button>
               </div>
             </form>

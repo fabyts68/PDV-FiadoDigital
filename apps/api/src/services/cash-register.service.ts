@@ -1,7 +1,13 @@
 import { CashRegisterRepository } from "../repositories/cash-register.repository.js";
+import { SettingsRepository } from "../repositories/settings.repository.js";
+import { NotificationService } from "./notification.service.js";
+import { formatCents, NOTIFICATION_SEVERITIES, NOTIFICATION_TYPES } from "@pdv/shared";
 import type { CashRegisterQueryParams } from "../repositories/cash-register.repository.js";
 
 const cashRegisterRepository = new CashRegisterRepository();
+const settingsRepository = new SettingsRepository();
+const notificationService = new NotificationService();
+const CASH_REGISTER_ALERT_AMOUNT_SETTING = "cash_register_alert_amount_cents";
 
 export class CashRegisterService {
   async list(options: CashRegisterQueryParams) {
@@ -76,11 +82,43 @@ export class CashRegisterService {
       throw new Error("Operador inválido");
     }
 
-    return cashRegisterRepository.cashIn(
+    const updatedRegister = await cashRegisterRepository.cashIn(
       payload.cash_register_id,
       payload.amount_cents,
       payload.description,
       payload.operator_id,
     );
+
+    await this.notifyCashRegisterAmountReached(updatedRegister.terminal_id);
+
+    return updatedRegister;
+  }
+
+  private async notifyCashRegisterAmountReached(terminalId: string) {
+    const thresholdSetting = await settingsRepository.findByKey(CASH_REGISTER_ALERT_AMOUNT_SETTING);
+    const threshold = Number.parseInt(thresholdSetting?.value ?? "0", 10) || 0;
+
+    if (threshold <= 0) {
+      return;
+    }
+
+    const balance = await cashRegisterRepository.getCurrentCashBalanceByTerminal(terminalId);
+
+    if (!balance) {
+      return;
+    }
+
+    if (balance.totalCashCents < threshold) {
+      return;
+    }
+
+    notificationService.create({
+      type: NOTIFICATION_TYPES.CASH_REGISTER_AMOUNT_REACHED,
+      severity: NOTIFICATION_SEVERITIES.MEDIUM,
+      title: "Valor de caixa atingiu limite de alerta",
+      message: `O caixa em dinheiro do terminal atingiu ${formatCents(balance.totalCashCents)}, acima do valor de alerta configurado (${formatCents(threshold)}).`,
+      meta: JSON.stringify({ terminalId, redirectPath: "/control" }),
+      target_roles: ["admin", "manager"],
+    }).catch((err: unknown) => console.error("[Notification] Erro ao criar notificação de caixa:", err));
   }
 }

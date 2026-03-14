@@ -24,4 +24,14 @@ export class SettingsRepository {
       },
     });
   }
+
+  async findByPrefix(prefix: string) {
+    return prisma.settings.findMany({
+      where: {
+        key: {
+          startsWith: prefix,
+        },
+      },
+    });
+  }
 }

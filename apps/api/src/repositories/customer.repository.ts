@@ -373,4 +373,42 @@ export class CustomerRepository {
       data: { is_active: false },
     });
   }
+
+  async findOverdueWithDebt() {
+    const today = new Date();
+    const currentDay = today.getDate();
+
+    return prisma.customer.findMany({
+      where: {
+        deleted_at: null,
+        current_debt_cents: { gt: 0 },
+        payment_due_day: { not: null, lt: currentDay },
+      },
+      select: {
+        id: true,
+        name: true,
+        current_debt_cents: true,
+        payment_due_day: true,
+      },
+    });
+  }
+
+  async findDueDayWithDebt() {
+    const today = new Date();
+    const currentDay = today.getDate();
+
+    return prisma.customer.findMany({
+      where: {
+        deleted_at: null,
+        current_debt_cents: { gt: 0 },
+        payment_due_day: { equals: currentDay },
+      },
+      select: {
+        id: true,
+        name: true,
+        current_debt_cents: true,
+        payment_due_day: true,
+      },
+    });
+  }
 }

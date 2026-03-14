@@ -1,4 +1,5 @@
 import { prisma } from "../config/database.js";
+import { PAYMENT_METHODS } from "@pdv/shared";
 import type { Prisma } from "@prisma/client";
 
 export interface CashRegisterQueryParams {
@@ -145,5 +146,97 @@ export class CashRegisterRepository {
         },
       });
     });
+  }
+
+  async getCurrentCashBalanceByTerminal(terminalId: string) {
+    const openRegister = await this.findOpenByTerminal(terminalId);
+
+    if (!openRegister) {
+      return null;
+    }
+
+    const [paymentGroups, legacySaleGroups, cashDiscountAggregate, movementGroups] = await Promise.all([
+      prisma.salePayment.groupBy({
+        by: ["method"],
+        where: {
+          method: PAYMENT_METHODS.CASH,
+          sale: {
+            deleted_at: null,
+            status: "completed",
+            terminal_id: terminalId,
+          },
+        },
+        _sum: {
+          amount_cents: true,
+        },
+      }),
+      prisma.sale.groupBy({
+        by: ["payment_method"],
+        where: {
+          deleted_at: null,
+          status: "completed",
+          terminal_id: terminalId,
+          payment_method: PAYMENT_METHODS.CASH,
+          payments: {
+            none: {},
+          },
+        },
+        _sum: {
+          total_cents: true,
+        },
+      }),
+      prisma.sale.aggregate({
+        where: {
+          deleted_at: null,
+          status: "completed",
+          terminal_id: terminalId,
+          discount_cents: { gt: 0 },
+          OR: [
+            { payment_method: PAYMENT_METHODS.CASH },
+            { payments: { some: { method: PAYMENT_METHODS.CASH } } },
+          ],
+        },
+        _sum: {
+          discount_cents: true,
+        },
+      }),
+      prisma.transaction.groupBy({
+        by: ["type"],
+        where: {
+          cash_register_id: openRegister.id,
+          type: {
+            in: ["cash_in", "cash_out"],
+          },
+        },
+        _sum: {
+          amount_cents: true,
+        },
+      }),
+    ]);
+
+    const paymentCash = paymentGroups.reduce((acc, group) => acc + (group._sum.amount_cents ?? 0), 0);
+    const legacyCash = legacySaleGroups.reduce((acc, group) => acc + (group._sum.total_cents ?? 0), 0);
+    const cashDiscount = cashDiscountAggregate._sum.discount_cents ?? 0;
+
+    let movementBalance = 0;
+
+    for (const movement of movementGroups) {
+      const amount = movement._sum.amount_cents ?? 0;
+
+      if (movement.type === "cash_in") {
+        movementBalance += amount;
+      }
+
+      if (movement.type === "cash_out") {
+        movementBalance -= amount;
+      }
+    }
+
+    const totalCashCents = openRegister.opening_balance_cents + movementBalance + paymentCash + legacyCash - cashDiscount;
+
+    return {
+      registerId: openRegister.id,
+      totalCashCents,
+    };
   }
 }

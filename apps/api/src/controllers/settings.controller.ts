@@ -27,6 +27,13 @@ export class SettingsController {
         fiado_max_days: req.body.fiado_max_days,
         fiado_allow_inactive: req.body.fiado_allow_inactive,
         fiado_blocked_message: req.body.fiado_blocked_message,
+        stock_alert_min_units: req.body.stock_alert_min_units,
+        stock_alert_min_bulk_kg: req.body.stock_alert_min_bulk_kg,
+        cash_register_alert_amount_cents: req.body.cash_register_alert_amount_cents,
+        refund_alert_limit_cents: req.body.refund_alert_limit_cents,
+        fiado_alert_at_90_percent: req.body.fiado_alert_at_90_percent,
+        fiado_alert_on_due_day: req.body.fiado_alert_on_due_day,
+        stock_alert_type_settings: req.body.stock_alert_type_settings,
       });
 
       res.json({ success: true, data: settings });

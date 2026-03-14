@@ -16,3 +16,8 @@ export type { Transaction } from "./transaction.js";
 export type { StockMovement, StockMovementType } from "./stock-movement.js";
 export type { AuditLog } from "./audit-log.js";
 export type { ApiResponse, PaginatedResult, PaginatedResponse } from "./api.js";
+export type {
+  Notification,
+  NotificationSeverity,
+  CreateNotificationPayload,
+} from "./notification.js";

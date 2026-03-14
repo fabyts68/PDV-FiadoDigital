@@ -15,6 +15,7 @@ const navItems: NavItem[] = [
   { label: "Clientes", to: "/customers", roles: ["admin", "manager"] },
   { label: "Funcionários", to: "/employees", roles: ["admin", "manager"] },
   { label: "Controle", to: "/control", roles: ["admin"] },
+  { label: "Notificações", to: "/notifications", roles: ["admin", "manager", "operator"] },
   { label: "Configurações", to: "/settings", roles: ["admin"] },
 ];
 
