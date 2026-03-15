@@ -1,7 +1,7 @@
 import { useAuthStore } from "@/stores/auth.store.js";
 import { useRouter } from "vue-router";
 import { ROLES } from "@pdv/shared";
-import type { Role } from "@pdv/shared";
+import type { Role, User } from "@pdv/shared";
 
 function getDefaultRouteByRole(role: Role): string {
   const roleRoutes: Record<Role, string> = {
@@ -27,7 +27,7 @@ export function useAuth() {
 
     // Guard against empty or non-JSON responses (e.g. proxy 502 with no body)
     // to prevent raw SyntaxError from surfacing to the user.
-    let data: { success?: boolean; data?: { accessToken: string; user: { role: Role } }; message?: string };
+    let data: { success?: boolean; data?: { accessToken: string; user: User }; message?: string };
     try {
       data = await response.json();
     } catch {

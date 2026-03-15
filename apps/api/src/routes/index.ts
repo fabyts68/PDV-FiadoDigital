@@ -13,6 +13,7 @@ import { cardMachineRouter } from "./card-machine.routes.js";
 import { controlRouter } from "./control.routes.js";
 import { stockMovementRouter } from "./stock-movement.routes.js";
 import { notificationRouter } from "./notification.routes.js";
+import { dashboardRouter } from "./dashboard.routes.js";
 
 export const router = Router();
 
@@ -30,3 +31,4 @@ router.use("/card-machines", cardMachineRouter);
 router.use("/control", controlRouter);
 router.use("/stock-movements", stockMovementRouter);
 router.use("/notifications", notificationRouter);
+router.use("/", dashboardRouter);

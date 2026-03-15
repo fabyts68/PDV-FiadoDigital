@@ -21,3 +21,4 @@ export type {
   NotificationSeverity,
   CreateNotificationPayload,
 } from "./notification.js";
+export type { DashboardSummary } from "./dashboard.js";
