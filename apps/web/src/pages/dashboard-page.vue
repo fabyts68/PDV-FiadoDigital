@@ -69,6 +69,16 @@ const fiadoTodayCents = computed(() => {
   return summary.value?.financial.by_payment_method.fiado ?? 0;
 });
 
+const periodLabel = computed<string>(() => {
+  const map: Record<PeriodPreset, string> = {
+    today:     "hoje",
+    yesterday: "ontem",
+    week:      "nos últimos 7 dias",
+    month:     "neste mês",
+  };
+  return map[activePeriod.value];
+});
+
 const discountColor = computed(() => {
   const val = summary.value?.financial.discount_total_cents ?? 0;
   if (val === 0) return "text-success";
@@ -306,9 +316,9 @@ onUnmounted(() => {
 <template>
   <div class="flex min-h-screen bg-surface">
     <AppSidebar />
-    <div class="flex flex-1 flex-col">
+    <div class="flex min-w-0 flex-1 flex-col">
       <AppHeader />
-      <main class="flex-1 p-4 md:p-6">
+      <main class="min-w-0 flex-1 px-3 py-4 sm:px-4 md:px-6 md:py-6">
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 class="text-2xl font-bold text-gray-900">Visão Geral</h1>
@@ -341,12 +351,12 @@ onUnmounted(() => {
         </div>
 
         <!-- Melhoria 5: barra de filtro de período -->
-        <div class="mb-6 flex flex-wrap gap-2" role="group" aria-label="Filtro de período">
+        <div class="mb-6 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap" role="group" aria-label="Filtro de período">
           <button
             v-for="preset in periodPresets"
             :key="preset.value"
             type="button"
-            class="min-h-11 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+            class="min-h-11 w-full rounded-lg px-4 py-2 text-sm font-medium transition-colors sm:w-auto"
             :class="activePeriod === preset.value ? 'bg-primary text-white' : 'border bg-white text-gray-600 hover:bg-surface'"
             :aria-pressed="activePeriod === preset.value"
             @click="activePeriod = preset.value"
@@ -384,13 +394,13 @@ onUnmounted(() => {
                   :yesterday="summary?.financial_yesterday.total_sales_cents"
                 />
               </div>
-              <p class="text-xs font-medium uppercase tracking-wide text-gray-400">Total vendido hoje</p>
+              <p class="text-xs font-medium uppercase tracking-wide text-gray-500">Total vendido {{ periodLabel }}</p>
               <p class="mt-1 text-4xl leading-none font-bold text-success">
                 <template v-if="isLoading"><span class="skeleton inline-block h-8 w-28 rounded" /></template>
                 <template v-else-if="showMonetaryValues">{{ formatCents(summary?.financial.total_sales_cents ?? 0) }}</template>
                 <template v-else>R$ ••••</template>
               </p>
-              <p class="mt-2 text-xs text-gray-400">
+              <p class="mt-2 text-xs text-gray-500">
                 <template v-if="isLoading"><span class="skeleton inline-block h-3 w-16 rounded" /></template>
                 <template v-else>{{ summary?.financial.total_sales_count ?? 0 }} venda(s)</template>
               </p>
@@ -405,15 +415,15 @@ onUnmounted(() => {
                   :yesterday="0"
                 />
               </div>
-              <p class="text-xs font-medium uppercase tracking-wide text-gray-400">No fiado hoje</p>
+              <p class="text-xs font-medium uppercase tracking-wide text-gray-500">No fiado {{ periodLabel }}</p>
               <p class="mt-1 text-3xl leading-none font-bold text-warning">
                 <template v-if="isLoading"><span class="skeleton inline-block h-8 w-28 rounded" /></template>
                 <template v-else-if="showMonetaryValues">{{ formatCents(fiadoTodayCents) }}</template>
                 <template v-else>R$ ••••</template>
               </p>
-              <p class="mt-2 text-xs text-gray-400">
+              <p class="mt-2 text-xs text-gray-500">
                 <template v-if="isLoading"><span class="skeleton inline-block h-3 w-16 rounded" /></template>
-                <template v-else>Valor acumulado do dia</template>
+                <template v-else>Valor acumulado {{ periodLabel }}</template>
               </p>
             </div>
 
@@ -423,7 +433,7 @@ onUnmounted(() => {
               :class="cancellationsCardClass"
             >
               <span class="mb-1 block text-2xl">🗑️</span>
-              <p class="text-xs font-medium uppercase tracking-wide text-gray-500">Cancelamentos de hoje</p>
+              <p class="text-xs font-medium uppercase tracking-wide text-gray-500">Cancelamentos {{ periodLabel }}</p>
               <p
                 class="mt-1 text-3xl leading-none font-bold"
                 :class="(summary?.financial.cancellations_count ?? 0) > 0 ? 'text-danger' : 'text-gray-400'"
@@ -431,7 +441,7 @@ onUnmounted(() => {
                 <template v-if="isLoading"><span class="skeleton inline-block h-8 w-16 rounded" /></template>
                 <template v-else>{{ summary?.financial.cancellations_count ?? 0 }}</template>
               </p>
-              <p class="mt-2 text-xs text-gray-400">
+              <p class="mt-2 text-xs text-gray-500">
                 <template v-if="isLoading"><span class="skeleton inline-block h-3 w-16 rounded" /></template>
                 <template v-else-if="showMonetaryValues && (summary?.financial.cancellations_total_cents ?? 0) > 0">
                   {{ formatCents(summary?.financial.cancellations_total_cents ?? 0) }}
@@ -451,7 +461,7 @@ onUnmounted(() => {
                 <template v-else-if="showMonetaryValues">{{ formatCents(summary?.financial.discount_total_cents ?? 0) }}</template>
                 <template v-else>R$ ••••</template>
               </p>
-              <p class="mt-2 text-xs text-gray-400">
+              <p class="mt-2 text-xs text-gray-500">
                 <template v-if="isLoading"><span class="skeleton inline-block h-3 w-16 rounded" /></template>
                 <template v-else>{{ summary?.financial.discount_occurrences ?? 0 }} arredondamento(s)</template>
               </p>
@@ -517,37 +527,33 @@ onUnmounted(() => {
                   <p class="text-xs text-gray-500">{{ notification.message }}</p>
                 </li>
               </ul>
-              <p v-else class="text-sm text-gray-400">Sem notificações críticas não lidas.</p>
+              <p v-else class="text-sm text-gray-500">Sem notificações críticas não lidas.</p>
             </div>
           </div>
 
-          <div
-            v-if="viewMode === 'manager'"
-            class="mb-6 rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100"
-          >
-            <h2 class="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">
-              Como entrou o dinheiro hoje
-            </h2>
-            <div v-if="isLoading" class="flex gap-4">
-              <span class="skeleton h-32 w-32 rounded-full" />
-              <div class="flex flex-col justify-center gap-2">
-                <span v-for="i in 4" :key="i" class="skeleton h-3 w-24 rounded" />
+          <div v-if="viewMode === 'manager'" class="mb-6 grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-3">
+            <div class="rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100 lg:col-span-2">
+              <h2 class="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">
+                Como entrou o dinheiro {{ periodLabel }}
+              </h2>
+              <div v-if="isLoading" class="flex gap-4">
+                <span class="skeleton h-32 w-32 rounded-full" />
+                <div class="flex flex-col justify-center gap-2">
+                  <span v-for="i in 4" :key="i" class="skeleton h-3 w-24 rounded" />
+                </div>
               </div>
+              <PaymentDonutChart
+                v-else
+                :data="summary?.financial.by_payment_method ?? {}"
+                :show-values="showMonetaryValues"
+                @drill-down="handleDrillDown"
+              />
             </div>
-            <!-- Melhoria 7: escutar evento de drilldown do gráfico -->
-            <PaymentDonutChart
-              v-else
-              :data="summary?.financial.by_payment_method ?? {}"
-              :show-values="showMonetaryValues"
-              @drill-down="handleDrillDown"
-            />
-          </div>
 
-          <div v-if="viewMode === 'manager'" class="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <div class="rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
-              <div class="mb-3 flex items-center justify-between gap-2">
+              <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500">⚠️ Faltando na Prateleira</h2>
-                <div class="flex items-center gap-2">
+                <div class="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     class="min-h-11 rounded-lg border px-3 py-2 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50"
@@ -565,7 +571,7 @@ onUnmounted(() => {
               </div>
               <p
                 v-else-if="!summary?.stock_alerts.length"
-                class="text-sm text-gray-400"
+                class="text-sm text-gray-500"
               >✅ Tudo em estoque.</p>
               <ul v-else class="space-y-2">
                 <li
@@ -577,7 +583,7 @@ onUnmounted(() => {
                     <p class="text-sm font-medium text-gray-800">{{ item.product_name }}</p>
                     <p class="text-xs font-bold text-danger">
                       {{ formatStockQuantity(item.stock_quantity, item.is_bulk) }}
-                      <span class="font-normal text-gray-400">
+                      <span class="font-normal text-gray-500">
                         / mín. {{ item.is_bulk ? `${item.min_stock_alert} kg` : `${item.min_stock_alert} un` }}
                       </span>
                     </p>
@@ -592,8 +598,11 @@ onUnmounted(() => {
               </ul>
             </div>
 
+          </div>
+
+          <div v-if="viewMode === 'manager'" class="grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-2">
             <div class="rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
-              <div class="mb-3 flex items-center justify-between">
+              <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500">📒 Fiado vencido</h2>
                 <router-link to="/customers" class="text-xs text-primary hover:underline">
                   Ver todos →
@@ -604,7 +613,7 @@ onUnmounted(() => {
               </div>
               <p
                 v-else-if="!summary?.overdue_customers.length"
-                class="text-sm text-gray-400"
+                class="text-sm text-gray-500"
               >✅ Nenhum cliente com fiado vencido.</p>
               <ul v-else class="space-y-2">
                 <li
@@ -674,7 +683,7 @@ onUnmounted(() => {
             aria-modal="true"
             :aria-labelledby="'charge-modal-title'"
           >
-            <div class="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
+            <div class="mx-auto max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
               <h2 id="charge-modal-title" class="mb-4 text-lg font-bold text-gray-900">
                 📒 Cobrar fiado
               </h2>

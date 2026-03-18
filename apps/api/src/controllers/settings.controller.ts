@@ -33,6 +33,8 @@ export class SettingsController {
         refund_alert_limit_cents: req.body.refund_alert_limit_cents,
         fiado_alert_at_90_percent: req.body.fiado_alert_at_90_percent,
         fiado_alert_on_due_day: req.body.fiado_alert_on_due_day,
+        whatsapp_message_fiado_vencido: req.body.whatsapp_message_fiado_vencido,
+        whatsapp_message_fiado_a_vencer: req.body.whatsapp_message_fiado_a_vencer,
         stock_alert_type_settings: req.body.stock_alert_type_settings,
       });
 

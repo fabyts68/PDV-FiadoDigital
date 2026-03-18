@@ -1,5 +1,6 @@
 import type { DashboardSummary } from "@pdv/shared";
 import { prisma } from "../config/database.js";
+import { config } from "../config/index.js";
 import type { PeriodPreset } from "../services/dashboard.service.js";
 
 const PAYMENT_METHOD_KEYS = ["cash", "pix", "credit_card", "debit_card", "fiado"] as const;
@@ -15,44 +16,142 @@ type SaleWithPayments = {
   }>;
 };
 
+type ZonedDateParts = {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+};
+
+const zonedDateFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: config.timeZone,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
+
+function getZonedDateParts(date: Date): ZonedDateParts {
+  const parts = zonedDateFormatter.formatToParts(date);
+
+  return {
+    year: Number(parts.find((part) => part.type === "year")?.value ?? 0),
+    month: Number(parts.find((part) => part.type === "month")?.value ?? 0),
+    day: Number(parts.find((part) => part.type === "day")?.value ?? 0),
+    hour: Number(parts.find((part) => part.type === "hour")?.value ?? 0),
+    minute: Number(parts.find((part) => part.type === "minute")?.value ?? 0),
+    second: Number(parts.find((part) => part.type === "second")?.value ?? 0),
+  };
+}
+
+function getTimeZoneOffset(date: Date): number {
+  const zoned = getZonedDateParts(date);
+  const zonedAsUtc = Date.UTC(
+    zoned.year,
+    zoned.month - 1,
+    zoned.day,
+    zoned.hour,
+    zoned.minute,
+    zoned.second,
+    0,
+  );
+
+  return zonedAsUtc - date.getTime();
+}
+
+function createUtcDateFromZonedParts(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number,
+  millisecond: number,
+): Date {
+  const utcGuess = Date.UTC(year, month - 1, day, hour, minute, second, millisecond);
+  const initialDate = new Date(utcGuess);
+  const initialOffset = getTimeZoneOffset(initialDate);
+  const adjustedDate = new Date(utcGuess - initialOffset);
+  const adjustedOffset = getTimeZoneOffset(adjustedDate);
+
+  if (adjustedOffset === initialOffset) {
+    return adjustedDate;
+  }
+
+  return new Date(utcGuess - adjustedOffset);
+}
+
+function shiftZonedDate(date: Date, days: number): Date {
+  const zoned = getZonedDateParts(date);
+
+  return new Date(Date.UTC(zoned.year, zoned.month - 1, zoned.day + days, 12, 0, 0, 0));
+}
+
+function getStartOfDay(date: Date): Date {
+  const zoned = getZonedDateParts(date);
+
+  return createUtcDateFromZonedParts(zoned.year, zoned.month, zoned.day, 0, 0, 0, 0);
+}
+
+function getEndOfDay(date: Date): Date {
+  const zoned = getZonedDateParts(date);
+
+  return createUtcDateFromZonedParts(zoned.year, zoned.month, zoned.day, 23, 59, 59, 999);
+}
+
 function resolveDateRange(preset: PeriodPreset): { from: Date; to: Date } {
   const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  if (preset === "today") {
+    // Retorna do início do dia (00:00:00) até o momento atual
+    return {
+      from: getStartOfDay(now),
+      to:   now,
+    };
+  }
 
   if (preset === "yesterday") {
-    const from = new Date(startOfToday);
-    from.setDate(from.getDate() - 1);
-    return { from, to: startOfToday };
+    const yesterday = shiftZonedDate(now, -1);
+    return {
+      from: getStartOfDay(yesterday),
+      to:   getEndOfDay(yesterday),
+    };
   }
 
   if (preset === "week") {
-    const from = new Date(startOfToday);
-    from.setDate(from.getDate() - 6);
-    const to = new Date(startOfToday);
-    to.setDate(to.getDate() + 1);
-    return { from, to };
+    const weekAgo = shiftZonedDate(now, -6);
+    return {
+      from: getStartOfDay(weekAgo),
+      to:   now,
+    };
   }
 
   if (preset === "month") {
-    const from = new Date(now.getFullYear(), now.getMonth(), 1);
-    const to = new Date(startOfToday);
-    to.setDate(to.getDate() + 1);
-    return { from, to };
+    const zoned = getZonedDateParts(now);
+    const startOfMonth = createUtcDateFromZonedParts(zoned.year, zoned.month, 1, 12, 0, 0, 0);
+    return {
+      from: getStartOfDay(startOfMonth),
+      to:   now,
+    };
   }
 
-  // default: today
-  const to = new Date(startOfToday);
-  to.setDate(to.getDate() + 1);
-  return { from: startOfToday, to };
+  // Fallback (nunca deve ser atingido, mas por segurança)
+  return {
+    from: getStartOfDay(now),
+    to:   now,
+  };
 }
 
 export class DashboardRepository {
   async getSummary(preset: PeriodPreset = "today"): Promise<DashboardSummary> {
     const now = new Date();
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-    const startOfYesterday = new Date(startOfDay);
-    startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+    const startOfDay = getStartOfDay(now);
+    const startOfYesterday = getStartOfDay(shiftZonedDate(now, -1));
 
     const { from: periodFrom, to: periodTo } = resolveDateRange(preset);
 
@@ -69,7 +168,7 @@ export class DashboardRepository {
         where: {
           created_at: {
             gte: periodFrom,
-            lt: periodTo,
+            lte: periodTo,
           },
           deleted_at: null,
         },

@@ -321,259 +321,318 @@ async function toggleStatus(employee: Employee): Promise<void> {
     <div class="flex flex-1 flex-col">
       <AppHeader />
       <main class="flex-1 p-6">
-        <div class="flex items-center justify-between">
-          <h1 class="text-3xl font-bold text-gray-900">Funcionários</h1>
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h1 class="text-2xl font-bold text-gray-900 sm:text-3xl">Funcionários</h1>
           <button
             @click="openCreateModal"
-            class="rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark"
+            class="min-h-11 w-full rounded-lg bg-primary px-4 text-sm font-medium text-white transition hover:bg-primary-dark sm:w-auto"
           >
             + Novo Funcionário
           </button>
         </div>
 
         <!-- Listagem -->
-        <div class="mt-6 overflow-x-auto rounded-lg border border-gray-200 bg-white">
-          <table class="w-full">
-            <caption class="sr-only">Lista de funcionarios cadastrados</caption>
-            <thead class="bg-gray-50">
-              <tr>
-                <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Nome</th>
-                <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Usuário</th>
-                <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Cargo</th>
-                <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Status</th>
-                <th scope="col" class="px-6 py-3 text-center text-sm font-semibold text-gray-700">Ações</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-200">
-              <tr v-for="employee in employees" :key="employee.id" class="hover:bg-gray-50">
-                <td class="px-6 py-4 text-sm text-gray-900">{{ employee.name }}</td>
-                <td class="px-6 py-4 text-sm text-gray-600">{{ employee.username }}</td>
-                <td class="px-6 py-4 text-sm text-gray-600">
-                  {{ employee.role === "stockist" ? "Estoquista" : "Caixa" }}
-                </td>
-                <td class="px-6 py-4">
-                  <span
-                    :class="[
-                      'inline-block rounded-full px-3 py-1 text-xs font-semibold',
-                      employee.is_active
-                        ? 'bg-green-100 text-green-800'
-                        : 'bg-red-100 text-red-800',
-                    ]"
-                  >
-                    {{ employee.is_active ? "Ativo" : "Inativo" }}
-                  </span>
-                </td>
-                <td class="flex items-center justify-center gap-2 px-6 py-4">
-                  <button
-                    @click="openEditModal(employee)"
-                    class="rounded px-3 py-1 text-sm text-primary transition hover:bg-gray-100"
-                  >
-                    Editar
-                  </button>
-                  <button
-                    @click="toggleStatus(employee)"
-                    :class="[
-                      'rounded px-3 py-1 text-sm transition',
-                      employee.is_active
-                        ? 'text-red-600 hover:bg-red-50'
-                        : 'text-green-600 hover:bg-green-50',
-                    ]"
-                  >
-                    {{ employee.is_active ? "Desativar" : "Ativar" }}
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+        <div class="mt-6">
+          <div class="hidden overflow-x-auto rounded-lg border border-gray-200 bg-white md:block">
+            <table class="w-full">
+              <caption class="sr-only">Lista de funcionarios cadastrados</caption>
+              <thead class="bg-gray-50">
+                <tr>
+                  <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Nome</th>
+                  <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Usuário</th>
+                  <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Cargo</th>
+                  <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Status</th>
+                  <th scope="col" class="px-6 py-3 text-center text-sm font-semibold text-gray-700">Ações</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-200">
+                <tr v-for="employee in employees" :key="employee.id" class="hover:bg-gray-50">
+                  <td class="px-6 py-4 text-sm text-gray-900">{{ employee.name }}</td>
+                  <td class="px-6 py-4 text-sm text-gray-600">{{ employee.username }}</td>
+                  <td class="px-6 py-4 text-sm text-gray-600">
+                    {{ employee.role === "stockist" ? "Estoquista" : "Caixa" }}
+                  </td>
+                  <td class="px-6 py-4">
+                    <span
+                      :class="[
+                        'inline-block rounded-full px-3 py-1 text-xs font-semibold',
+                        employee.is_active
+                          ? 'bg-green-100 text-green-800'
+                          : 'bg-red-100 text-red-800',
+                      ]"
+                    >
+                      {{ employee.is_active ? "Ativo" : "Inativo" }}
+                    </span>
+                  </td>
+                  <td class="flex items-center justify-center gap-2 px-6 py-4">
+                    <button
+                      @click="openEditModal(employee)"
+                      class="min-h-11 inline-flex items-center rounded px-3 py-1 text-sm text-primary transition hover:bg-gray-100"
+                    >
+                      Editar
+                    </button>
+                    <button
+                      @click="toggleStatus(employee)"
+                      :class="[
+                        'min-h-11 inline-flex items-center rounded px-3 py-1 text-sm transition',
+                        employee.is_active
+                          ? 'text-red-600 hover:bg-red-50'
+                          : 'text-green-600 hover:bg-green-50',
+                      ]"
+                    >
+                      {{ employee.is_active ? "Desativar" : "Ativar" }}
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <ul class="space-y-2 md:hidden">
+            <li
+              v-for="employee in employees"
+              :key="employee.id"
+              class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+            >
+              <div class="mb-3 flex items-start justify-between gap-2">
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-base font-semibold text-gray-900">
+                    {{ employee.name }}
+                  </p>
+                  <p class="mt-0.5 text-xs text-gray-400">
+                    @{{ employee.username }} ·
+                    {{ employee.role === "stockist" ? "Estoquista" : "Caixa" }}
+                  </p>
+                </div>
+                <span
+                  :class="[
+                    'flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold',
+                    employee.is_active
+                      ? 'bg-green-100 text-green-800'
+                      : 'bg-red-100 text-red-800',
+                  ]"
+                >
+                  {{ employee.is_active ? "Ativo" : "Inativo" }}
+                </span>
+              </div>
+
+              <div v-if="canManageCostVisibility && employee.role === 'stockist'" class="mb-3">
+                <span
+                  :class="[
+                    'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
+                    employee.can_view_cost_price
+                      ? 'bg-primary/10 text-primary'
+                      : 'bg-gray-100 text-gray-500',
+                  ]"
+                >
+                  {{ employee.can_view_cost_price ? "Vê preço de custo" : "Preço de custo oculto" }}
+                </span>
+              </div>
+
+              <div class="flex gap-2">
+                <button
+                  type="button"
+                  :aria-label="`Editar funcionário ${employee.name}`"
+                  class="min-h-11 inline-flex flex-1 items-center justify-center rounded-lg border border-gray-200 text-sm font-medium text-primary transition hover:bg-primary/5 active:bg-primary/10"
+                  @click="openEditModal(employee)"
+                >
+                  Editar
+                </button>
+
+                <button
+                  type="button"
+                  :aria-label="`${employee.is_active ? 'Desativar' : 'Ativar'} funcionário ${employee.name}`"
+                  :class="[
+                    'min-h-11 inline-flex flex-1 items-center justify-center rounded-lg border text-sm font-medium transition',
+                    employee.is_active
+                      ? 'border-red-100 text-red-600 hover:bg-red-50 active:bg-red-100'
+                      : 'border-green-100 text-green-600 hover:bg-green-50 active:bg-green-100',
+                  ]"
+                  @click="toggleStatus(employee)"
+                >
+                  {{ employee.is_active ? "Desativar" : "Ativar" }}
+                </button>
+              </div>
+            </li>
+
+            <li
+              v-if="employees.length === 0"
+              class="rounded-xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-400"
+            >
+              Nenhum funcionário cadastrado ainda.
+            </li>
+          </ul>
         </div>
 
         <!-- Modal -->
         <div
           v-if="showModal"
           ref="modalRef"
-          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          class="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 backdrop-blur-sm sm:items-center sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="employee-modal-title"
           @click.self="closeModal"
           @keydown="handleModalKeydown"
         >
-          <div class="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
-            <!-- Cabeçalho -->
-            <div class="mb-4 flex items-center justify-between">
-              <h2 id="employee-modal-title" class="text-xl font-bold text-gray-900">
-                {{ isEditMode ? "Editar Funcionário" : "Novo Funcionário" }}
-              </h2>
-              <button
-                type="button"
-                @click="closeModal"
-                class="rounded-lg p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600"
-                aria-label="Fechar modal"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  class="h-6 w-6"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <div v-if="formErrors.submit" class="mb-4 rounded bg-red-100 p-3 text-sm text-danger" role="alert">
-              {{ formErrors.submit }}
-            </div>
-
-            <form @submit.prevent="submitForm" class="space-y-4">
-              <!-- Nome -->
-              <div>
-                <label for="name" class="mb-1 block text-sm font-medium text-gray-700">Nome *</label>
-                <input
-                  id="name"
-                  v-model="formData.name"
-                  type="text"
-                  maxlength="50"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
-                <div v-if="formErrors.name" class="mt-1 text-xs text-danger">
-                  {{ formErrors.name[0] }}
-                </div>
-              </div>
-
-              <!-- Usuário -->
-              <div>
-                <label for="username" class="mb-1 block text-sm font-medium text-gray-700">Usuário *</label>
-                <input
-                  id="username"
-                  v-model="formData.username"
-                  type="text"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
-                <div v-if="formErrors.username" class="mt-1 text-xs text-danger">
-                  {{ formErrors.username[0] }}
-                </div>
-              </div>
-
-              <!-- Senha -->
-              <div v-if="!isEditMode">
-                <label for="password" class="mb-1 block text-sm font-medium text-gray-700">
-                  Senha (6 dígitos) *
-                </label>
-                <input
-                  id="password"
-                  v-model="formData.password"
-                  type="password"
-                  maxlength="6"
-                  inputmode="numeric"
-                  placeholder="000000"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
-                <div v-if="formErrors.password" class="mt-1 text-xs text-danger">
-                  {{ formErrors.password[0] }}
-                </div>
-              </div>
-
-              <!-- Confirmar Senha -->
-              <div v-if="!isEditMode">
-                <label for="confirmPassword" class="mb-1 block text-sm font-medium text-gray-700">
-                  Confirmar Senha *
-                </label>
-                <input
-                  id="confirmPassword"
-                  v-model="formData.confirmPassword"
-                  type="password"
-                  maxlength="6"
-                  inputmode="numeric"
-                  placeholder="000000"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
-                <div v-if="formErrors.confirmPassword" class="mt-1 text-xs text-danger">
-                  {{ formErrors.confirmPassword[0] }}
-                </div>
-              </div>
-
-              <!-- Cargo -->
-              <div>
-                <label for="role" class="mb-1 block text-sm font-medium text-gray-700">Cargo *</label>
-                <select
-                  id="role"
-                  v-model="formData.role"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                >
-                  <option v-for="opt in roleOptions" :key="opt.value" :value="opt.value">
-                    {{ opt.label }}
-                  </option>
-                </select>
-                <div v-if="formErrors.role" class="mt-1 text-xs text-danger">
-                  {{ formErrors.role[0] }}
-                </div>
-              </div>
-
-              <div v-if="canManageCostVisibility" class="flex items-center gap-2">
-                <input
-                  id="can_view_cost_price"
-                  v-model="formData.can_view_cost_price"
-                  type="checkbox"
-                  class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-primary/20"
-                />
-                <label for="can_view_cost_price" class="text-sm font-medium text-gray-700">
-                  Permitir visualizar preço de custo
-                </label>
-              </div>
-
-              <!-- Situação -->
-              <div class="flex items-center gap-2">
-                <input
-                  id="is_active"
-                  v-model="formData.is_active"
-                  type="checkbox"
-                  class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-primary/20"
-                />
-                <label for="is_active" class="text-sm font-medium text-gray-700">Ativo</label>
-              </div>
-
-              <!-- Botões -->
-              <div class="flex justify-end gap-3 pt-4">
+          <div class="relative max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:max-w-md sm:rounded-2xl">
+            <div class="mx-auto mt-3 h-1 w-12 rounded-full bg-gray-200 sm:hidden" aria-hidden="true" />
+            <div class="p-4 sm:p-6">
+              <!-- Cabeçalho -->
+              <div class="mb-4 flex items-center justify-between">
+                <h2 id="employee-modal-title" class="text-xl font-bold text-gray-900">
+                  {{ isEditMode ? "Editar Funcionário" : "Novo Funcionário" }}
+                </h2>
                 <button
                   type="button"
                   @click="closeModal"
-                  class="rounded border border-gray-300 px-4 py-2 font-medium text-gray-700 transition hover:bg-gray-50"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  :disabled="loading"
-                  class="flex items-center gap-2 rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark disabled:opacity-50 disabled:cursor-not-allowed"
+                  class="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-600"
+                  aria-label="Fechar modal"
                 >
                   <svg
-                    v-if="loading"
-                    class="h-4 w-4 animate-spin"
                     xmlns="http://www.w3.org/2000/svg"
+                    class="h-6 w-6"
                     fill="none"
                     viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    stroke-width="2"
                   >
-                    <circle
-                      class="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      stroke-width="4"
-                    ></circle>
-                    <path
-                      class="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                    ></path>
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
                   </svg>
-                  <span>{{ loading ? "Salvando..." : isEditMode ? "Atualizar" : "Cadastrar" }}</span>
                 </button>
               </div>
-            </form>
+
+              <div v-if="formErrors.submit" class="mb-4 rounded-lg bg-red-100 p-3 text-sm text-danger" role="alert">
+                {{ formErrors.submit }}
+              </div>
+
+              <form @submit.prevent="submitForm" class="space-y-4">
+                <!-- Nome -->
+                <div>
+                  <label for="name" class="mb-1 block text-sm font-medium text-gray-700">Nome *</label>
+                  <input
+                    id="name"
+                    v-model="formData.name"
+                    type="text"
+                    maxlength="50"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                  <div v-if="formErrors.name" class="mt-1 text-xs text-danger">
+                    {{ formErrors.name[0] }}
+                  </div>
+                </div>
+
+                <!-- Usuário -->
+                <div>
+                  <label for="username" class="mb-1 block text-sm font-medium text-gray-700">Usuário *</label>
+                  <input
+                    id="username"
+                    v-model="formData.username"
+                    type="text"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                  <div v-if="formErrors.username" class="mt-1 text-xs text-danger">
+                    {{ formErrors.username[0] }}
+                  </div>
+                </div>
+
+                <!-- Senha -->
+                <div v-if="!isEditMode">
+                  <label for="password" class="mb-1 block text-sm font-medium text-gray-700">
+                    Senha (6 dígitos) *
+                  </label>
+                  <input
+                    id="password"
+                    v-model="formData.password"
+                    type="password"
+                    maxlength="6"
+                    inputmode="numeric"
+                    placeholder="000000"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                  <div v-if="formErrors.password" class="mt-1 text-xs text-danger">
+                    {{ formErrors.password[0] }}
+                  </div>
+                </div>
+
+                <!-- Confirmar Senha -->
+                <div v-if="!isEditMode">
+                  <label for="confirmPassword" class="mb-1 block text-sm font-medium text-gray-700">
+                    Confirmar Senha *
+                  </label>
+                  <input
+                    id="confirmPassword"
+                    v-model="formData.confirmPassword"
+                    type="password"
+                    maxlength="6"
+                    inputmode="numeric"
+                    placeholder="000000"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                  <div v-if="formErrors.confirmPassword" class="mt-1 text-xs text-danger">
+                    {{ formErrors.confirmPassword[0] }}
+                  </div>
+                </div>
+
+                <!-- Cargo -->
+                <div>
+                  <label for="role" class="mb-1 block text-sm font-medium text-gray-700">Cargo *</label>
+                  <select
+                    id="role"
+                    v-model="formData.role"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                    <option v-for="opt in roleOptions" :key="opt.value" :value="opt.value">
+                      {{ opt.label }}
+                    </option>
+                  </select>
+                  <div v-if="formErrors.role" class="mt-1 text-xs text-danger">
+                    {{ formErrors.role[0] }}
+                  </div>
+                </div>
+
+                <div v-if="canManageCostVisibility" class="flex items-center gap-2">
+                  <input
+                    id="can_view_cost_price"
+                    v-model="formData.can_view_cost_price"
+                    type="checkbox"
+                    class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-primary/20"
+                  />
+                  <label for="can_view_cost_price" class="text-sm font-medium text-gray-700">
+                    Permitir visualizar preço de custo
+                  </label>
+                </div>
+
+                <!-- Situação -->
+                <div class="flex items-center gap-2">
+                  <input
+                    id="is_active"
+                    v-model="formData.is_active"
+                    type="checkbox"
+                    class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-primary/20"
+                  />
+                  <label for="is_active" class="text-sm font-medium text-gray-700">Ativo</label>
+                </div>
+
+                <!-- Botões -->
+                <div class="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <button
+                    type="button"
+                    @click="closeModal"
+                    class="min-h-11 w-full rounded-lg border border-gray-300 px-4 text-sm font-medium text-gray-700 transition hover:bg-gray-50 sm:w-auto"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    :disabled="loading"
+                    class="min-h-11 w-full rounded-lg bg-primary px-6 text-sm font-medium text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                  >
+                    {{ loading ? "Salvando..." : isEditMode ? "Salvar alterações" : "Criar Funcionário" }}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
 

@@ -44,6 +44,10 @@ interface StockSummaryResponse {
     total_stock_value_cents: number;
     weighted_avg_cost_cents: number;
     weighted_average_cost_cents: number;
+    weighted_avg_cost_unit_cents: number;
+    weighted_average_cost_unit_cents: number;
+    weighted_avg_cost_bulk_cents: number;
+    weighted_average_cost_bulk_cents: number;
   };
 }
 
@@ -113,6 +117,10 @@ const stockSummary = ref<StockSummaryResponse["summary"]>({
   total_stock_value_cents: 0,
   weighted_avg_cost_cents: 0,
   weighted_average_cost_cents: 0,
+  weighted_avg_cost_unit_cents: 0,
+  weighted_average_cost_unit_cents: 0,
+  weighted_avg_cost_bulk_cents: 0,
+  weighted_average_cost_bulk_cents: 0,
 });
 
 const showHistoryModal = ref(false);
@@ -196,12 +204,20 @@ const stockTotalBulkByTypeDisplay = computed(() => {
   }));
 });
 
-const weightedAverageCostCents = computed(() => {
-  if (stockSummary.value.weighted_avg_cost_cents > 0) {
-    return stockSummary.value.weighted_avg_cost_cents;
+const weightedAverageUnitCostCents = computed(() => {
+  if (stockSummary.value.weighted_avg_cost_unit_cents > 0) {
+    return stockSummary.value.weighted_avg_cost_unit_cents;
   }
 
-  return stockSummary.value.weighted_average_cost_cents;
+  return stockSummary.value.weighted_average_cost_unit_cents;
+});
+
+const weightedAverageBulkCostCents = computed(() => {
+  if (stockSummary.value.weighted_avg_cost_bulk_cents > 0) {
+    return stockSummary.value.weighted_avg_cost_bulk_cents;
+  }
+
+  return stockSummary.value.weighted_average_cost_bulk_cents;
 });
 
 const selectedDiscountLimitCents = computed(() => {
@@ -791,46 +807,52 @@ async function loadCancellations(): Promise<void> {
     <div class="flex flex-1 flex-col">
       <AppHeader />
 
-      <main class="flex-1 p-6">
-        <div class="flex flex-wrap items-center justify-between gap-4">
-          <h1 class="text-3xl font-bold text-gray-900">Controle</h1>
+      <main class="flex-1 p-3 sm:p-6">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 class="text-2xl font-bold text-gray-900 sm:text-3xl">Controle</h1>
+          </div>
 
-          <button
-            type="button"
-            :aria-label="showMonetaryValues ? 'Ocultar valores monetários' : 'Mostrar valores monetários'"
-            class="rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
-            @click="showMonetaryValues = !showMonetaryValues"
-          >
-            {{ showMonetaryValues ? "👁 Ocultar valores" : "👁 Mostrar valores" }}
-          </button>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              :aria-label="showMonetaryValues ? 'Ocultar valores' : 'Mostrar valores'"
+              class="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-gray-200 text-gray-600 transition hover:bg-surface"
+              @click="showMonetaryValues = !showMonetaryValues"
+            >
+              {{ showMonetaryValues ? "👁" : "🙈" }}
+            </button>
+          </div>
         </div>
 
-        <div class="mt-6 flex items-center gap-2 border-b border-gray-200">
-          <button
-            type="button"
-            :class="[
-              'rounded-t-lg px-4 py-2 text-sm font-semibold transition',
-              activeTab === 'stock'
-                ? 'bg-primary text-white'
-                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
-            ]"
-            @click="activeTab = 'stock'"
-          >
-            Estoque
-          </button>
+        <div class="mt-6 overflow-x-auto -mx-3 px-3 md:mx-0 md:px-0">
+          <div class="flex min-w-max gap-1 border-b border-gray-200 md:min-w-0">
+            <button
+              type="button"
+              :class="[
+                'min-h-11 whitespace-nowrap rounded-t-lg px-5 py-2 text-sm font-semibold transition',
+                activeTab === 'stock'
+                  ? 'bg-primary text-white'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+              ]"
+              @click="activeTab = 'stock'"
+            >
+              Estoque
+            </button>
 
-          <button
-            type="button"
-            :class="[
-              'rounded-t-lg px-4 py-2 text-sm font-semibold transition',
-              activeTab === 'cash'
-                ? 'bg-primary text-white'
-                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
-            ]"
-            @click="activeTab = 'cash'"
-          >
-            Caixa
-          </button>
+            <button
+              type="button"
+              :class="[
+                'min-h-11 whitespace-nowrap rounded-t-lg px-5 py-2 text-sm font-semibold transition',
+                activeTab === 'cash'
+                  ? 'bg-primary text-white'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+              ]"
+              @click="activeTab = 'cash'"
+            >
+              Caixa
+            </button>
+          </div>
         </div>
 
         <section v-if="activeTab === 'stock'" class="mt-6 space-y-6">
@@ -840,7 +862,7 @@ async function loadCancellations(): Promise<void> {
               <select
                 v-model="selectedProductTypeId"
                 :disabled="loadingFilters"
-                class="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
               >
                 <option value="">Todos</option>
                 <option v-for="type in productTypes" :key="type.id" :value="type.id">
@@ -854,7 +876,7 @@ async function loadCancellations(): Promise<void> {
               <select
                 v-model="selectedBrandId"
                 :disabled="loadingFilters"
-                class="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
               >
                 <option value="">Todas</option>
                 <option v-for="brand in brands" :key="brand.id" :value="brand.id">
@@ -864,31 +886,53 @@ async function loadCancellations(): Promise<void> {
             </div>
           </div>
 
-          <div class="grid gap-4 md:grid-cols-3">
-            <article class="rounded-lg border border-gray-200 bg-white p-4">
-              <p class="text-sm font-medium text-gray-600">Total de Itens em Estoque</p>
-              <p class="mt-2 text-2xl font-bold text-gray-900">{{ stockTotalUnitDisplay }}</p>
-              <div class="mt-3 space-y-1" v-if="stockTotalBulkByTypeDisplay.length > 0">
+          <div class="grid gap-3 md:grid-cols-3">
+            <article class="rounded-xl border border-gray-200 bg-white p-4">
+              <p class="text-sm font-medium text-gray-500">Total em estoque</p>
+              <p class="mt-1 wrap-break-word text-2xl font-bold text-gray-900 sm:text-3xl">{{ stockTotalUnitDisplay }}</p>
+              <div class="mt-2 space-y-0.5" v-if="stockTotalBulkByTypeDisplay.length > 0">
                 <p
                   v-for="bulkRow in stockTotalBulkByTypeDisplay"
                   :key="bulkRow.type_name"
-                  class="text-sm text-gray-700"
+                  class="text-sm text-gray-600"
                 >
                   <span class="font-medium">{{ bulkRow.type_name }}:</span>
                   {{ bulkRow.total_kg_display }} kg
                 </p>
               </div>
-              <p v-else class="mt-3 text-sm text-gray-500">Sem produtos a granel</p>
+              <p v-else class="mt-2 text-xs text-gray-400">Sem produtos a granel</p>
             </article>
 
-            <article class="rounded-lg border border-gray-200 bg-white p-4">
-              <p class="text-sm font-medium text-gray-600">Valor Total do Estoque</p>
-              <p class="mt-2 text-2xl font-bold text-gray-900">{{ displayCents(stockSummary.total_stock_value_cents) }}</p>
+            <article class="rounded-xl border border-gray-200 bg-white p-4">
+              <p class="text-sm font-medium text-gray-500">Valor total do estoque</p>
+              <p class="mt-1 wrap-break-word text-2xl font-bold text-gray-900 sm:text-3xl">{{ displayCents(stockSummary.total_stock_value_cents) }}</p>
             </article>
 
-            <article class="rounded-lg border border-gray-200 bg-white p-4">
-              <p class="text-sm font-medium text-gray-600">Custo Médio Ponderado Geral</p>
-              <p class="mt-2 text-2xl font-bold text-gray-900">{{ displayCents(weightedAverageCostCents) }}</p>
+            <article class="rounded-xl border border-gray-200 bg-white p-4">
+              <p class="text-sm font-medium text-gray-500">Custo médio ponderado</p>
+              <div class="mt-3 space-y-3">
+                <div class="flex items-center justify-between gap-3 border-b border-gray-100 pb-3">
+                  <span class="text-sm text-gray-500">Unidade</span>
+                  <p class="wrap-break-word text-right text-lg font-bold text-gray-900 sm:text-2xl">
+                    <template v-if="stockSummary.total_items_quantity > 0">
+                      {{ displayCents(weightedAverageUnitCostCents) }}
+                      <span class="ml-1 text-xs font-medium text-gray-500">/un</span>
+                    </template>
+                    <span v-else class="text-sm font-medium text-gray-400">Sem produtos</span>
+                  </p>
+                </div>
+
+                <div class="flex items-center justify-between gap-3">
+                  <span class="text-sm text-gray-500">Granel</span>
+                  <p class="wrap-break-word text-right text-lg font-bold text-gray-900 sm:text-2xl">
+                    <template v-if="stockSummary.total_bulk_quantity > 0">
+                      {{ displayCents(weightedAverageBulkCostCents) }}
+                      <span class="ml-1 text-xs font-medium text-gray-500">/kg</span>
+                    </template>
+                    <span v-else class="text-sm font-medium text-gray-400">Sem produtos</span>
+                  </p>
+                </div>
+              </div>
             </article>
           </div>
 
@@ -918,8 +962,9 @@ async function loadCancellations(): Promise<void> {
             Nenhum produto encontrado com os filtros selecionados.
           </div>
 
-          <div v-else class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-            <table class="w-full min-w-[1200px]">
+          <div v-else>
+            <div class="hidden overflow-x-auto rounded-lg border border-gray-200 bg-white md:block">
+              <table class="w-full min-w-[1200px]">
               <caption class="sr-only">Resumo e analise de estoque por produto</caption>
               <thead class="bg-gray-50">
                 <tr>
@@ -999,7 +1044,63 @@ async function loadCancellations(): Promise<void> {
                   </td>
                 </tr>
               </tbody>
-            </table>
+              </table>
+            </div>
+
+            <ul class="space-y-2 md:hidden">
+              <li
+                v-for="row in stockRows"
+                :key="row.id"
+                class="rounded-xl border bg-white p-4 shadow-sm"
+                :class="row.low_stock ? 'border-danger/30' : 'border-gray-200'"
+              >
+                <div class="mb-3 flex items-start justify-between gap-2">
+                  <div class="min-w-0 flex-1">
+                    <p class="truncate text-base font-semibold text-gray-900">{{ row.name }}</p>
+                    <p class="mt-0.5 text-xs text-gray-400">
+                      {{ row.product_type?.name ?? '—' }}
+                      {{ row.brand ? `· ${row.brand.name}` : '' }}
+                    </p>
+                  </div>
+                  <span
+                    v-if="row.low_stock"
+                    class="shrink-0 rounded-full bg-danger/10 px-2 py-0.5 text-xs font-semibold text-danger"
+                  >
+                    ⚠️ Baixo
+                  </span>
+                </div>
+
+                <div class="mb-3 grid grid-cols-3 gap-2 text-center">
+                  <div class="rounded-lg bg-surface px-2 py-1.5">
+                    <p class="text-xs text-gray-400">Estoque</p>
+                    <p class="text-sm font-bold" :class="row.low_stock ? 'text-danger' : 'text-gray-800'">
+                      {{ formatStockQuantity(row.stock_quantity, row.is_bulk) }}
+                    </p>
+                  </div>
+                  <div class="rounded-lg bg-surface px-2 py-1.5">
+                    <p class="text-xs text-gray-400">Custo médio</p>
+                    <p class="text-sm font-bold text-gray-700">
+                      {{ displayCents(row.average_cost_cents) }}
+                    </p>
+                  </div>
+                  <div class="rounded-lg bg-surface px-2 py-1.5">
+                    <p class="text-xs text-gray-400">Valor total</p>
+                    <p class="text-sm font-bold text-primary">
+                      {{ displayCents(row.stock_value_cents) }}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  class="min-h-11 w-full rounded-lg border border-gray-200 text-sm font-medium text-primary transition hover:bg-primary/5"
+                  :aria-label="`Ver histórico de movimentação de ${row.name}`"
+                  @click="openHistoryModal(row)"
+                >
+                  📋 Ver histórico
+                </button>
+              </li>
+            </ul>
           </div>
 
           <div
@@ -1018,7 +1119,7 @@ async function loadCancellations(): Promise<void> {
               <button
                 type="button"
                 :disabled="stockPage === 1"
-                class="rounded border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                class="min-h-11 inline-flex items-center rounded border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                 @click="goToStockPage(stockPage - 1)"
               >
                 ← Anterior
@@ -1030,7 +1131,7 @@ async function loadCancellations(): Promise<void> {
                   :key="page"
                   type="button"
                   :class="[
-                    'rounded px-2 py-1 text-sm font-medium transition',
+                    'min-h-11 min-w-11 inline-flex items-center justify-center rounded px-2 py-1 text-sm font-medium transition',
                     page === stockPage
                       ? 'bg-primary text-white'
                       : 'border border-gray-300 text-gray-700 hover:bg-gray-50',
@@ -1044,7 +1145,7 @@ async function loadCancellations(): Promise<void> {
               <button
                 type="button"
                 :disabled="stockPage === stockTotalPages"
-                class="rounded border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                class="min-h-11 inline-flex items-center rounded border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                 @click="goToStockPage(stockPage + 1)"
               >
                 Próxima →
@@ -1054,44 +1155,25 @@ async function loadCancellations(): Promise<void> {
         </section>
 
         <section v-if="activeTab === 'cash'" class="mt-6 space-y-6">
-          <div class="flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-white p-4">
-            <span class="text-sm font-medium text-gray-700">Período:</span>
-            <button
-              type="button"
-              :class="[
-                'rounded px-3 py-1.5 text-sm font-medium transition',
-                periodPreset === 'today'
-                  ? 'bg-primary text-white'
-                  : 'border border-gray-300 text-gray-700 hover:bg-gray-50',
-              ]"
-              @click="periodPreset = 'today'"
-            >
-              Hoje
-            </button>
-            <button
-              type="button"
-              :class="[
-                'rounded px-3 py-1.5 text-sm font-medium transition',
-                periodPreset === 'week'
-                  ? 'bg-primary text-white'
-                  : 'border border-gray-300 text-gray-700 hover:bg-gray-50',
-              ]"
-              @click="periodPreset = 'week'"
-            >
-              Esta Semana
-            </button>
-            <button
-              type="button"
-              :class="[
-                'rounded px-3 py-1.5 text-sm font-medium transition',
-                periodPreset === 'month'
-                  ? 'bg-primary text-white'
-                  : 'border border-gray-300 text-gray-700 hover:bg-gray-50',
-              ]"
-              @click="periodPreset = 'month'"
-            >
-              Este Mês
-            </button>
+          <div class="rounded-lg border border-gray-200 bg-white p-4">
+            <span class="mb-2 block text-sm font-medium text-gray-700">Período:</span>
+            <div class="flex flex-wrap gap-2">
+              <button
+                v-for="preset in ['today', 'week', 'month']"
+                :key="preset"
+                type="button"
+                :class="[
+                  'h-9 rounded-lg px-4 text-sm font-medium transition',
+                  periodPreset === preset
+                    ? 'bg-primary text-white'
+                    : 'border border-gray-200 bg-white text-gray-600 hover:bg-surface',
+                ]"
+                :aria-pressed="periodPreset === preset"
+                @click="periodPreset = preset as PeriodPreset"
+              >
+                {{ preset === 'today' ? 'Hoje' : preset === 'week' ? 'Esta Semana' : 'Este Mês' }}
+              </button>
+            </div>
           </div>
 
           <div
@@ -1116,7 +1198,7 @@ async function loadCancellations(): Promise<void> {
             <div class="mt-4 grid gap-4 md:grid-cols-2">
               <div>
                 <p class="text-sm text-gray-600">Total de Descontos</p>
-                <p class="mt-1 text-2xl font-bold text-gray-900">{{ displayCents(discountSummary.total_discount_cents) }}</p>
+                <p class="mt-1 text-3xl font-bold text-gray-900">{{ displayCents(discountSummary.total_discount_cents) }}</p>
               </div>
 
               <div>
@@ -1143,7 +1225,7 @@ async function loadCancellations(): Promise<void> {
                   :value="discountLimitDailyInput"
                   type="text"
                   inputmode="numeric"
-                  class="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   @input="handleDailyLimitInput"
                 />
               </div>
@@ -1154,7 +1236,7 @@ async function loadCancellations(): Promise<void> {
                   :value="discountLimitWeeklyInput"
                   type="text"
                   inputmode="numeric"
-                  class="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   @input="handleWeeklyLimitInput"
                 />
               </div>
@@ -1165,7 +1247,7 @@ async function loadCancellations(): Promise<void> {
                   :value="discountLimitMonthlyInput"
                   type="text"
                   inputmode="numeric"
-                  class="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   @input="handleMonthlyLimitInput"
                 />
               </div>
@@ -1174,7 +1256,7 @@ async function loadCancellations(): Promise<void> {
                 <button
                   type="submit"
                   :disabled="discountLimitSaving"
-                  class="rounded bg-primary px-4 py-2 text-sm font-medium text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-60"
+                  class="min-h-11 w-full rounded-lg bg-primary px-6 text-sm font-medium text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                 >
                   {{ discountLimitSaving ? "Salvando..." : "Salvar limites" }}
                 </button>
@@ -1193,20 +1275,25 @@ async function loadCancellations(): Promise<void> {
               <div
                 v-for="row in paymentDistribution"
                 :key="row.key"
-                class="grid gap-2 rounded border border-gray-100 p-3 md:grid-cols-[1fr_auto]"
+                class="flex items-center gap-3 rounded-xl border border-gray-100 p-3"
               >
-                <div>
+                <div class="min-w-0 flex-1">
                   <p class="text-sm font-medium text-gray-800">{{ row.icon }} {{ row.label }}</p>
-                  <div class="mt-2 h-2 rounded-full bg-gray-200">
-                    <div class="h-2 rounded-full bg-primary" :style="{ width: `${row.percentage}%` }"></div>
+                  <div class="mt-1.5 h-1.5 rounded-full bg-gray-200">
+                    <div class="h-1.5 rounded-full bg-primary transition-all" :style="{ width: `${row.percentage}%` }"></div>
                   </div>
                 </div>
-                <p class="text-sm font-semibold text-gray-900">{{ displayCents(row.value) }}</p>
+                <div class="shrink-0 text-right">
+                  <p class="text-sm font-bold text-gray-900">{{ displayCents(row.value) }}</p>
+                  <p class="text-xs text-gray-400">{{ row.percentage }}%</p>
+                </div>
               </div>
 
-              <div class="rounded border border-primary/30 bg-primary/5 p-3">
-                <p class="text-sm font-medium text-gray-800">Total Geral</p>
-                <p class="text-xl font-bold text-gray-900">{{ displayCents(cashSummary.total_cents) }}</p>
+              <div class="rounded-xl border border-primary/30 bg-primary/5 p-4">
+                <div class="flex items-center justify-between">
+                  <p class="text-sm font-semibold text-gray-700">Total Geral</p>
+                  <p class="text-xl font-bold text-gray-900">{{ displayCents(cashSummary.total_cents) }}</p>
+                </div>
               </div>
             </div>
           </article>
@@ -1241,8 +1328,9 @@ async function loadCancellations(): Promise<void> {
               Nenhum cancelamento ou estorno encontrado no período.
             </div>
 
-            <div v-else class="mt-4 overflow-x-auto rounded-lg border border-gray-200">
-              <table class="w-full min-w-[760px]">
+            <div v-else class="mt-4">
+              <div class="hidden overflow-x-auto rounded-lg border border-gray-200 md:block">
+                <table class="w-full min-w-[760px]">
                 <caption class="sr-only">Lista de cancelamentos e estornos no periodo selecionado</caption>
                 <thead class="bg-gray-50">
                   <tr>
@@ -1270,7 +1358,37 @@ async function loadCancellations(): Promise<void> {
                     <td class="px-4 py-3 text-sm text-gray-700">{{ row.terminal_id }}</td>
                   </tr>
                 </tbody>
-              </table>
+                </table>
+              </div>
+
+              <ul class="space-y-2 md:hidden">
+                <li
+                  v-for="row in cancellationRows"
+                  :key="row.id"
+                  class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+                >
+                  <div class="mb-2 flex items-start justify-between gap-2">
+                    <div>
+                      <p class="text-sm font-semibold text-gray-800">
+                        {{ formatDateTime(row.created_at) }}
+                      </p>
+                      <p class="mt-0.5 text-xs text-gray-400">
+                        {{ row.operator.name }} · {{ row.terminal_id }}
+                      </p>
+                    </div>
+                    <span
+                      class="inline-flex shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold"
+                      :class="cancellationStatusClass(row.status)"
+                    >
+                      {{ cancellationStatusLabel(row.status) }}
+                    </span>
+                  </div>
+
+                  <p class="text-lg font-bold text-gray-900">
+                    {{ displayCents(row.total_cents) }}
+                  </p>
+                </li>
+              </ul>
             </div>
           </article>
         </section>
@@ -1279,86 +1397,127 @@ async function loadCancellations(): Promise<void> {
 
     <div
       v-if="showHistoryModal && historyProduct"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+      class="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 backdrop-blur-sm sm:items-center sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="stock-history-modal-title"
+      @click.self="closeHistoryModal"
     >
-      <div class="w-full max-w-5xl rounded-lg bg-white shadow-xl">
-        <header class="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-          <h3 id="stock-history-modal-title" class="text-lg font-semibold text-gray-900">
-            Histórico de Movimentação - {{ historyProduct.name }}
+      <div class="relative flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-xl sm:max-w-5xl sm:rounded-2xl">
+        <div class="mx-auto mt-3 h-1 w-12 shrink-0 rounded-full bg-gray-200 sm:hidden" aria-hidden="true" />
+
+        <header class="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-4 sm:px-6">
+          <h3 id="stock-history-modal-title" class="truncate text-base font-semibold text-gray-900 sm:text-lg">
+            Movimentação - {{ historyProduct.name }}
           </h3>
           <button
             type="button"
-            aria-label="Fechar modal de historico"
-            class="rounded p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
+            aria-label="Fechar"
+            class="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100"
             @click="closeHistoryModal"
           >
             ✕
           </button>
         </header>
 
-        <div class="max-h-[60vh] overflow-auto p-6">
-          <div v-if="movementLoading" class="space-y-3">
-            <div v-for="index in 6" :key="index" class="h-10 animate-pulse rounded bg-gray-100"></div>
-          </div>
-
-          <div
-            v-else-if="movementError"
-            class="rounded border border-red-200 bg-red-50 p-4 text-sm text-danger"
-          >
-            {{ movementError }}
-          </div>
-
-          <div
-            v-else-if="stockMovements.length === 0"
-            class="rounded border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600"
-          >
-            Nenhuma movimentação encontrada para este produto.
-          </div>
-
-          <div v-else class="rounded-lg border border-gray-200">
-            <div class="grid grid-cols-[180px_120px_120px_140px_minmax(0,1fr)] gap-3 border-b border-gray-200 bg-gray-50 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">
-              <span>Data/Hora</span>
-              <span>Tipo</span>
-              <span>Quantidade</span>
-              <span>Custo Unit.</span>
-              <span>Descrição</span>
-            </div>
-
-            <RecycleScroller
-              :items="stockMovements"
-              key-field="id"
-              :item-size="56"
-              class="max-h-[52vh] overflow-auto"
-              list-tag="div"
-              item-tag="div"
-            >
-              <template #default="{ item: movement }">
-                <div class="grid grid-cols-[180px_120px_120px_140px_minmax(0,1fr)] items-center gap-3 border-b border-gray-100 px-4 py-3 text-sm hover:bg-gray-50">
-                  <span class="text-gray-700">{{ formatDateTime(toStockMovement(movement).created_at) }}</span>
-                  <span>
-                    <span
-                      class="inline-flex rounded-full px-3 py-1 text-xs font-semibold"
-                      :class="movementTypeClass(toStockMovement(movement).type)"
-                    >
-                      {{ movementTypeLabel(toStockMovement(movement).type) }}
-                    </span>
-                  </span>
-                  <span class="text-gray-700">{{ formatMovementQuantity(toStockMovement(movement).quantity) }}</span>
-                  <span class="text-gray-700">{{ displayCents(toStockMovement(movement).unit_cost_cents) }}</span>
-                  <span class="truncate text-gray-700" :title="toStockMovement(movement).description || '—'">{{ toStockMovement(movement).description || '—' }}</span>
-                </div>
-              </template>
-            </RecycleScroller>
-          </div>
+        <div v-if="movementLoading" class="flex-1 space-y-3 overflow-auto p-4 sm:p-6">
+          <div v-for="index in 6" :key="index" class="h-10 animate-pulse rounded bg-gray-100"></div>
         </div>
 
-        <footer class="flex items-center justify-end gap-2 border-t border-gray-200 px-6 py-4">
+        <div
+          v-else-if="movementError"
+          class="m-4 rounded border border-red-200 bg-red-50 p-4 text-sm text-danger sm:m-6"
+        >
+          {{ movementError }}
+        </div>
+
+        <div
+          v-else-if="stockMovements.length === 0"
+          class="m-4 rounded border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600 sm:m-6"
+        >
+          Nenhuma movimentação encontrada para este produto.
+        </div>
+
+        <template v-else>
+          <div class="hidden flex-1 overflow-auto p-6 md:block">
+            <div class="rounded-lg border border-gray-200">
+              <div class="grid grid-cols-[180px_120px_120px_140px_minmax(0,1fr)] gap-3 border-b border-gray-200 bg-gray-50 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">
+                <span>Data/Hora</span>
+                <span>Tipo</span>
+                <span>Quantidade</span>
+                <span>Custo Unit.</span>
+                <span>Descrição</span>
+              </div>
+
+              <RecycleScroller
+                :items="stockMovements"
+                key-field="id"
+                :item-size="56"
+                class="max-h-[52vh] overflow-auto"
+                list-tag="div"
+                item-tag="div"
+              >
+                <template #default="{ item: movement }">
+                  <div class="grid grid-cols-[180px_120px_120px_140px_minmax(0,1fr)] items-center gap-3 border-b border-gray-100 px-4 py-3 text-sm hover:bg-gray-50">
+                    <span class="text-gray-700">{{ formatDateTime(toStockMovement(movement).created_at) }}</span>
+                    <span>
+                      <span
+                        class="inline-flex rounded-full px-3 py-1 text-xs font-semibold"
+                        :class="movementTypeClass(toStockMovement(movement).type)"
+                      >
+                        {{ movementTypeLabel(toStockMovement(movement).type) }}
+                      </span>
+                    </span>
+                    <span class="text-gray-700">{{ formatMovementQuantity(toStockMovement(movement).quantity) }}</span>
+                    <span class="text-gray-700">{{ displayCents(toStockMovement(movement).unit_cost_cents) }}</span>
+                    <span class="truncate text-gray-700" :title="toStockMovement(movement).description || '—'">{{ toStockMovement(movement).description || '—' }}</span>
+                  </div>
+                </template>
+              </RecycleScroller>
+            </div>
+          </div>
+
+          <ul class="flex-1 divide-y divide-gray-100 overflow-y-auto px-4 md:hidden">
+            <li v-for="movement in stockMovements" :key="movement.id" class="py-3">
+              <div class="mb-1 flex items-start justify-between gap-2">
+                <span
+                  class="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold"
+                  :class="movementTypeClass(toStockMovement(movement).type)"
+                >
+                  {{ movementTypeLabel(toStockMovement(movement).type) }}
+                </span>
+                <span class="text-xs text-gray-400">
+                  {{ formatDateTime(toStockMovement(movement).created_at) }}
+                </span>
+              </div>
+              <div class="mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5">
+                <p class="text-xs text-gray-500">
+                  Quantidade:
+                  <span class="font-semibold text-gray-800">
+                    {{ formatMovementQuantity(toStockMovement(movement).quantity) }}
+                  </span>
+                </p>
+                <p class="text-xs text-gray-500">
+                  Custo unit.:
+                  <span class="font-semibold text-gray-800">
+                    {{ displayCents(toStockMovement(movement).unit_cost_cents) }}
+                  </span>
+                </p>
+              </div>
+              <p
+                v-if="toStockMovement(movement).description"
+                class="mt-1 truncate text-xs text-gray-500"
+              >
+                {{ toStockMovement(movement).description }}
+              </p>
+            </li>
+          </ul>
+        </template>
+
+        <footer class="flex shrink-0 items-center justify-end gap-2 border-t border-gray-200 px-4 py-4 sm:px-6">
           <button
             type="button"
-            class="rounded bg-primary px-4 py-2 text-sm font-medium text-white transition hover:bg-primary-dark"
+            class="min-h-11 w-full rounded-lg bg-primary px-4 text-sm font-medium text-white transition hover:bg-primary-dark sm:w-auto"
             @click="openAdjustmentModal"
           >
             + Registrar Ajuste
@@ -1369,25 +1528,29 @@ async function loadCancellations(): Promise<void> {
 
     <div
       v-if="showAdjustmentModal"
-      class="fixed inset-0 z-60 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+      class="fixed inset-0 z-60 flex items-end justify-center bg-black/50 p-0 backdrop-blur-sm sm:items-center sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="stock-adjustment-modal-title"
+      @click.self="closeAdjustmentModal"
     >
-      <div class="w-full max-w-lg rounded-lg bg-white shadow-xl">
-        <header class="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-          <h3 id="stock-adjustment-modal-title" class="text-lg font-semibold text-gray-900">Registrar Ajuste Manual</h3>
+      <div class="relative flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-xl sm:max-w-lg sm:rounded-2xl">
+        <div class="mx-auto mt-3 h-1 w-12 shrink-0 rounded-full bg-gray-200 sm:hidden" aria-hidden="true" />
+
+        <header class="flex items-center justify-between border-b border-gray-200 px-4 py-4 sm:px-6">
+          <h3 id="stock-adjustment-modal-title" class="text-base font-semibold text-gray-900 sm:text-lg">Registrar Ajuste Manual</h3>
           <button
             type="button"
             aria-label="Fechar modal de ajuste de estoque"
-            class="rounded p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
+            class="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100"
             @click="closeAdjustmentModal"
           >
             ✕
           </button>
         </header>
 
-        <form class="space-y-4 p-6" @submit.prevent="submitAdjustment">
+        <form class="flex flex-1 flex-col overflow-y-auto" @submit.prevent="submitAdjustment">
+          <div class="space-y-4 px-4 py-4 sm:px-6">
           <div>
             <label class="mb-1 block text-sm font-medium text-gray-700">Quantidade (positivo/negativo)</label>
             <input
@@ -1395,7 +1558,7 @@ async function loadCancellations(): Promise<void> {
               type="text"
               inputmode="decimal"
               placeholder="Ex.: 5 ou -2"
-              class="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+              class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
             />
           </div>
 
@@ -1405,7 +1568,7 @@ async function loadCancellations(): Promise<void> {
               :value="adjustmentUnitCostInput"
               type="text"
               inputmode="numeric"
-              class="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+              class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
               @input="handleAdjustmentUnitCostInput"
             />
           </div>
@@ -1416,16 +1579,17 @@ async function loadCancellations(): Promise<void> {
               v-model="adjustmentDescription"
               rows="3"
               placeholder="Ex.: Ajuste - Avaria"
-              class="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+              class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
             ></textarea>
           </div>
 
           <p v-if="adjustmentError" class="text-sm text-danger">{{ adjustmentError }}</p>
+          </div>
 
-          <div class="flex justify-end gap-2">
+          <div class="flex flex-col-reverse gap-2 border-t border-gray-200 px-4 py-4 sm:flex-row sm:justify-end sm:px-6">
             <button
               type="button"
-              class="rounded border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+              class="min-h-11 w-full rounded-lg border border-gray-300 px-4 text-sm font-medium text-gray-700 transition hover:bg-gray-50 sm:w-auto"
               @click="closeAdjustmentModal"
             >
               Cancelar
@@ -1433,9 +1597,9 @@ async function loadCancellations(): Promise<void> {
             <button
               type="submit"
               :disabled="adjustmentLoading"
-              class="rounded bg-primary px-4 py-2 text-sm font-medium text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-60"
+              class="min-h-11 w-full rounded-lg bg-primary px-6 text-sm font-medium text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
             >
-              {{ adjustmentLoading ? 'Salvando...' : 'Salvar Ajuste' }}
+              {{ adjustmentLoading ? 'Salvando...' : 'Confirmar Ajuste' }}
             </button>
           </div>
         </form>

@@ -95,6 +95,8 @@ const updateGeneralSettingsSchema = z
     refund_alert_limit_cents: z.number().int().nonnegative().optional(),
     fiado_alert_at_90_percent: z.boolean().optional(),
     fiado_alert_on_due_day: z.boolean().optional(),
+    whatsapp_message_fiado_vencido: z.string().trim().max(2000).optional(),
+    whatsapp_message_fiado_a_vencer: z.string().trim().max(2000).optional(),
   })
   .passthrough()
   .superRefine((data, context) => {
@@ -145,6 +147,8 @@ const updateGeneralSettingsSchema = z
       refund_alert_limit_cents: data.refund_alert_limit_cents,
       fiado_alert_at_90_percent: data.fiado_alert_at_90_percent,
       fiado_alert_on_due_day: data.fiado_alert_on_due_day,
+      whatsapp_message_fiado_vencido: data.whatsapp_message_fiado_vencido,
+      whatsapp_message_fiado_a_vencer: data.whatsapp_message_fiado_a_vencer,
       stock_alert_type_settings: stockAlertTypeSettings,
     };
   })
@@ -167,6 +171,8 @@ const updateGeneralSettingsSchema = z
       data.refund_alert_limit_cents !== undefined ||
       data.fiado_alert_at_90_percent !== undefined ||
       data.fiado_alert_on_due_day !== undefined ||
+      data.whatsapp_message_fiado_vencido !== undefined ||
+      data.whatsapp_message_fiado_a_vencer !== undefined ||
       Object.keys(data.stock_alert_type_settings).length > 0,
     {
       message: "Informe ao menos um limite para atualização.",

@@ -16,6 +16,17 @@ type StockSummaryRow = {
   } | null;
 };
 
+function resolveEffectiveAverageCostCents(averageCostCents: number, costPriceCents: number): number {
+  return averageCostCents > 0 ? averageCostCents : costPriceCents;
+}
+
+function calculateWeightedAverageCostCents(rows: StockSummaryRow[]): number {
+  const weightedBase = rows.reduce((acc, item) => acc + item.stock_quantity * item.average_cost_cents, 0);
+  const weightedStock = rows.reduce((acc, item) => acc + item.stock_quantity, 0);
+
+  return weightedStock > 0 ? Math.round(weightedBase / weightedStock) : 0;
+}
+
 function toRange(startDate?: string, endDate?: string): { gte?: Date; lte?: Date } | undefined {
   if (!startDate && !endDate) {
     return undefined;
@@ -84,9 +95,10 @@ export class ControlRepository {
       product_type: { id: string; name: string } | null;
       brand: { id: string; name: string } | null;
     }) => {
-      const effectiveAverageCostCents = product.average_cost_cents > 0
-        ? product.average_cost_cents
-        : product.cost_price_cents;
+      const effectiveAverageCostCents = resolveEffectiveAverageCostCents(
+        product.average_cost_cents,
+        product.cost_price_cents,
+      );
       const stockValueCents = Math.round(product.stock_quantity * effectiveAverageCostCents);
 
       return {
@@ -143,12 +155,18 @@ export class ControlRepository {
 
       total = count;
       data = products.map(mapProductRow);
-      rowsForSummary = summaryProducts.map((item) => ({
-        ...item,
-        stock_value_cents: Math.round(
-          item.stock_quantity * (item.average_cost_cents > 0 ? item.average_cost_cents : item.cost_price_cents),
-        ),
-      }));
+      rowsForSummary = summaryProducts.map((item) => {
+        const effectiveAverageCostCents = resolveEffectiveAverageCostCents(
+          item.average_cost_cents,
+          item.cost_price_cents,
+        );
+
+        return {
+          ...item,
+          average_cost_cents: effectiveAverageCostCents,
+          stock_value_cents: Math.round(item.stock_quantity * effectiveAverageCostCents),
+        };
+      });
     }
 
     if (!dbSortField) {
@@ -225,10 +243,15 @@ export class ControlRepository {
       .sort((left, right) => left.type_name.localeCompare(right.type_name, "pt-BR"));
 
     const totalStockValueCents = rowsForSummary.reduce((acc, item) => acc + item.stock_value_cents, 0);
-
-    const weightedBase = rowsForSummary.reduce((acc, item) => acc + item.stock_quantity * item.average_cost_cents, 0);
-    const weightedStock = rowsForSummary.reduce((acc, item) => acc + item.stock_quantity, 0);
-    const weightedAverageCostCents = weightedStock > 0 ? Math.round(weightedBase / weightedStock) : 0;
+    const unitRows = rowsForSummary.filter((item) => !item.is_bulk);
+    const bulkRows = rowsForSummary.filter((item) => item.is_bulk);
+    const weightedAverageUnitCostCents = calculateWeightedAverageCostCents(unitRows);
+    const weightedAverageBulkCostCents = calculateWeightedAverageCostCents(bulkRows);
+    const weightedAverageCostCents = unitRows.length === 0
+      ? weightedAverageBulkCostCents
+      : bulkRows.length === 0
+        ? weightedAverageUnitCostCents
+        : 0;
 
     return {
       data,
@@ -245,6 +268,10 @@ export class ControlRepository {
         total_stock_value_cents: totalStockValueCents,
         weighted_avg_cost_cents: weightedAverageCostCents,
         weighted_average_cost_cents: weightedAverageCostCents,
+        weighted_avg_cost_unit_cents: weightedAverageUnitCostCents,
+        weighted_average_cost_unit_cents: weightedAverageUnitCostCents,
+        weighted_avg_cost_bulk_cents: weightedAverageBulkCostCents,
+        weighted_average_cost_bulk_cents: weightedAverageBulkCostCents,
       },
     };
   }

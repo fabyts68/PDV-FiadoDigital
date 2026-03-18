@@ -9,6 +9,8 @@ import {
   type Product,
 } from "@pdv/shared";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { BrowserMultiFormatReader } from "@zxing/browser";
+import { NotFoundException } from "@zxing/library";
 import QRCode from "qrcode";
 import { RecycleScroller } from "vue-virtual-scroller";
 import AppHeader from "@/components/layout/app-header.vue";
@@ -55,6 +57,7 @@ const terminalId = ref(localStorage.getItem("pdv_terminal_id") || "PDV-01");
 const { showConfirm, confirmTitle, confirmMessage, confirmLabel, confirm, onConfirm, onCancel } = useConfirm();
 const pixCopied = ref(false);
 const showHotkeys = ref(false);
+const isPanelCollapsed = ref(true);
 
 if (!localStorage.getItem("pdv_terminal_id")) {
   localStorage.setItem("pdv_terminal_id", terminalId.value);
@@ -85,6 +88,13 @@ const productEntryInput = ref("");
 const productInputRef = ref<HTMLInputElement | null>(null);
 const productMessage = ref<string | null>(null);
 const productLoading = ref(false);
+const showCameraScanner = ref(false);
+const cameraVideoRef = ref<HTMLVideoElement | null>(null);
+const cameraError = ref<string | null>(null);
+const isScanning = ref(false);
+
+let codeReader: BrowserMultiFormatReader | null = null;
+let scannerControls: Awaited<ReturnType<BrowserMultiFormatReader["decodeFromVideoDevice"]>> | null = null;
 
 const selectedItemProductId = ref<string | null>(null);
 
@@ -170,7 +180,8 @@ const hasModalOpen = computed(
     showPixManualConfirmModal.value ||
     showCashOutModal.value ||
     showCashInModal.value ||
-    showCustomerListModal.value,
+    showCustomerListModal.value ||
+    showCameraScanner.value,
 );
 
 const subtotalCents = computed(() => saleStore.subtotalCents);
@@ -476,6 +487,10 @@ onUnmounted(() => {
     clearTimeout(scannerTimer);
   }
 
+  scannerControls?.stop();
+  scannerControls = null;
+  codeReader = null;
+
   stopPixQRCodeCountdown();
   stopPixStatusPolling();
 });
@@ -514,6 +529,13 @@ watch(productSearchInput, (value) => {
     void searchProductsServer(query);
   }, 300);
 });
+
+watch(
+  () => saleStore.saleUuid,
+  () => {
+    isPanelCollapsed.value = true;
+  },
+);
 
 watch(
   () => showWeightModal.value,
@@ -577,6 +599,8 @@ watch(
         message: alertMessage,
         productId: payload.productId,
       });
+
+      isPanelCollapsed.value = false;
 
       // Remove o toast após 5 segundos
       setTimeout(() => {
@@ -663,6 +687,111 @@ function restoreProductInputFocus(): void {
   setTimeout(() => {
     productInputRef.value?.focus();
   }, 0);
+}
+
+async function openCameraScanner(): Promise<void> {
+  cameraError.value = null;
+  showCameraScanner.value = true;
+
+  await nextTick();
+
+  // getUserMedia exige contexto seguro (HTTPS ou localhost) nos navegadores mobile.
+  // Acesso via http:// bloqueia a câmera com SecurityError ou NotAllowedError silencioso.
+  if (!window.isSecureContext) {
+    isScanning.value = false;
+    cameraError.value =
+      "Câmera bloqueada: a página precisa ser acessada via HTTPS. Contate o administrador do sistema.";
+    return;
+  }
+
+  if (!cameraVideoRef.value) {
+    isScanning.value = false;
+    cameraError.value = "Elemento de vídeo da câmera não disponível.";
+    return;
+  }
+
+  const videoElement = cameraVideoRef.value;
+
+  type ScanCallback = Parameters<BrowserMultiFormatReader["decodeFromConstraints"]>[2];
+  const scanCallback: ScanCallback = (result, error) => {
+    if (result) {
+      productEntryInput.value = result.getText();
+      closeCameraScanner();
+      void handleProductEntry();
+      return;
+    }
+    if (error && !(error instanceof NotFoundException)) {
+      cameraError.value = "Erro ao processar imagem da câmera.";
+    }
+  };
+
+  try {
+    codeReader = new BrowserMultiFormatReader();
+    isScanning.value = true;
+
+    // Prefere a câmera traseira (environment) para leitura de código de barras.
+    // ideal: "environment" funciona no mobile sem forçar falha se só houver câmera frontal.
+    scannerControls = await codeReader.decodeFromConstraints(
+      { video: { facingMode: { ideal: "environment" } } },
+      videoElement,
+      scanCallback,
+    );
+  } catch (error) {
+    isScanning.value = false;
+
+    if (!(error instanceof Error)) {
+      cameraError.value = "Não foi possível acessar a câmera.";
+      return;
+    }
+
+    if (error.name === "NotAllowedError") {
+      cameraError.value = "Permissão de câmera negada. Verifique as configurações do navegador.";
+      return;
+    }
+
+    if (error.name === "NotFoundError") {
+      cameraError.value = "Nenhuma câmera encontrada neste dispositivo.";
+      return;
+    }
+
+    if (error.name === "SecurityError") {
+      cameraError.value =
+        "Câmera bloqueada por política de segurança. Acesse o sistema via HTTPS.";
+      return;
+    }
+
+    // OverconstrainedError: dispositivo não suportou facingMode — tenta sem restrição.
+    if (error.name === "OverconstrainedError" || error.name === "ConstraintNotSatisfiedError") {
+      try {
+        codeReader = new BrowserMultiFormatReader();
+        isScanning.value = true;
+        scannerControls = await codeReader.decodeFromConstraints(
+          { video: true },
+          videoElement,
+          scanCallback,
+        );
+      } catch {
+        isScanning.value = false;
+        cameraError.value = "Câmera incompatível com este dispositivo.";
+      }
+      return;
+    }
+
+    cameraError.value = "Não foi possível acessar a câmera.";
+  }
+}
+
+function closeCameraScanner(): void {
+  scannerControls?.stop();
+  scannerControls = null;
+  codeReader = null;
+  isScanning.value = false;
+  showCameraScanner.value = false;
+  cameraError.value = null;
+
+  nextTick(() => {
+    productInputRef.value?.focus();
+  });
 }
 
 async function focusWeightedInput(): Promise<void> {
@@ -763,6 +892,14 @@ function buildPaymentsWithFees(): Array<{ method: PaymentMethod; amount_cents: n
 
     return entry;
   });
+}
+
+function updateFinalizedPaymentSummary(): void {
+  // Exibe o valor total efetivamente recebido, independente do meio de pagamento.
+  finalizedReceivedCents.value = paymentRowsTotalCents.value;
+
+  // Troco só existe quando há pagamento em dinheiro com valor recebido informado.
+  finalizedChangeCents.value = cashChangeCents.value;
 }
 
 function handlePaymentMethodChange(row: PaymentEntry): void {
@@ -1551,10 +1688,7 @@ async function confirmPayment(): Promise<void> {
       return;
     }
 
-    finalizedReceivedCents.value = cashReceivedInput.value.trim()
-      ? cashReceivedCents.value
-      : cashAmountRequiredCents.value;
-    finalizedChangeCents.value = cashChangeCents.value;
+    updateFinalizedPaymentSummary();
     paymentSuccess.value = true;
 
     await requestReceiptPrint({
@@ -1809,10 +1943,7 @@ async function confirmPixReceived(source: "manual" | "automatic" = "manual"): Pr
       return;
     }
 
-    finalizedReceivedCents.value = cashReceivedInput.value.trim()
-      ? cashReceivedCents.value
-      : cashAmountRequiredCents.value;
-    finalizedChangeCents.value = cashChangeCents.value;
+    updateFinalizedPaymentSummary();
     paymentSuccess.value = true;
 
     await requestReceiptPrint({
@@ -1946,6 +2077,17 @@ function resetSaleState(): void {
   productEntryInput.value = "";
 }
 
+const storeName = ref("PDV FiadoDigital");
+const storeAddress = ref("Endereço não informado");
+const storePhone = ref("Telefone não informado");
+
+const printReceiptNumber = computed(() => {
+  const saleId = saleStore.saleUuid ?? "sem-identificador";
+  return saleId.slice(0, 8).toUpperCase();
+});
+
+const printDateTime = computed(() => formatDateTime(now.value));
+
 function handleGlobalKeydown(event: KeyboardEvent): void {
   if (captureScannerInput(event)) {
     return;
@@ -2049,7 +2191,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
 </script>
 
 <template>
-  <div class="flex min-h-screen bg-surface">
+  <div class="flex min-h-screen bg-surface print:hidden">
     <AppSidebar />
     <div class="flex flex-1 flex-col">
       <AppHeader />
@@ -2081,33 +2223,57 @@ function captureScannerInput(event: KeyboardEvent): boolean {
 
       <main class="flex-1 p-4 md:p-6">
         <section
-          class="sticky top-0 z-20 mb-4 grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm md:grid-cols-5"
+          class="sticky top-0 z-20 mb-4 rounded-xl border border-slate-200 bg-white shadow-sm md:grid md:grid-cols-5 md:gap-3 md:p-3"
+          :class="isPanelCollapsed ? 'p-2' : 'p-3'"
         >
-          <div>
-            <p class="text-xs text-slate-500">Terminal</p>
-            <p class="text-base font-semibold text-slate-900">{{ terminalId }}</p>
-          </div>
-          <div>
-            <p class="text-xs text-slate-500">Operador</p>
-            <p class="text-base font-semibold text-slate-900">{{ authStore.user?.name || "N/D" }}</p>
-          </div>
-          <div>
-            <p class="text-xs text-slate-500">Data e hora</p>
-            <p class="text-base font-semibold text-slate-900">{{ formatDateTime(now) }}</p>
-          </div>
-          <div class="flex flex-col gap-1">
-            <span class="inline-flex items-center gap-2 text-sm">
-              <span :class="isOnline ? 'text-green-600' : 'text-red-600'">{{ isOnline ? "●" : "●" }}</span>
-              <span class="text-slate-700">{{ isOnline ? "Online" : "Offline" }}</span>
+          <button
+            type="button"
+            class="flex w-full items-center justify-between md:hidden"
+            :aria-expanded="!isPanelCollapsed"
+            aria-label="Expandir informações do caixa"
+            @click="isPanelCollapsed = !isPanelCollapsed"
+          >
+            <span class="truncate text-sm font-medium text-gray-700">
+              {{ terminalId }} {{ selectedCustomer ? `· ${selectedCustomer.name}` : "· Sem cliente" }}
             </span>
-            <span class="inline-flex items-center gap-2 text-sm">
-              <span :class="isConnected ? 'text-green-600' : 'text-red-600'">{{ isConnected ? "●" : "●" }}</span>
-              <span class="text-slate-700">WebSocket</span>
+            <span
+              class="ml-2 text-gray-400 transition-transform duration-200"
+              :class="isPanelCollapsed ? 'rotate-0' : 'rotate-180'"
+            >
+              ▼
             </span>
-          </div>
-          <div>
-            <p class="text-xs text-slate-500">Impressora</p>
-            <p class="text-base font-semibold text-slate-900">N/D</p>
+          </button>
+
+          <div
+            class="transition-all duration-200"
+            :class="isPanelCollapsed ? 'hidden md:contents' : 'mt-2 grid grid-cols-1 gap-3 md:contents md:gap-0 md:mt-0'"
+          >
+            <div>
+              <p class="text-xs text-slate-500">Terminal</p>
+              <p class="text-base font-semibold text-slate-900">{{ terminalId }}</p>
+            </div>
+            <div>
+              <p class="text-xs text-slate-500">Operador</p>
+              <p class="text-base font-semibold text-slate-900">{{ authStore.user?.name || "N/D" }}</p>
+            </div>
+            <div>
+              <p class="text-xs text-slate-500">Data e hora</p>
+              <p class="text-base font-semibold text-slate-900">{{ formatDateTime(now) }}</p>
+            </div>
+            <div class="flex flex-col gap-1">
+              <span class="inline-flex items-center gap-2 text-sm">
+                <span :class="isOnline ? 'text-green-600' : 'text-red-600'">{{ isOnline ? "●" : "●" }}</span>
+                <span class="text-slate-700">{{ isOnline ? "Online" : "Offline" }}</span>
+              </span>
+              <span class="inline-flex items-center gap-2 text-sm">
+                <span :class="isConnected ? 'text-green-600' : 'text-red-600'">{{ isConnected ? "●" : "●" }}</span>
+                <span class="text-slate-700">WebSocket</span>
+              </span>
+            </div>
+            <div>
+              <p class="text-xs text-slate-500">Impressora</p>
+              <p class="text-base font-semibold text-slate-900">N/D</p>
+            </div>
           </div>
         </section>
 
@@ -2198,22 +2364,48 @@ function captureScannerInput(event: KeyboardEvent): boolean {
 
             <div class="mb-4 rounded-lg border border-slate-200 p-3">
               <p class="mb-2 text-sm font-medium text-slate-700">Entrada de produtos</p>
-              <input
-                ref="productInputRef"
-                v-model="productEntryInput"
-                type="text"
-                autofocus
-                placeholder="Código de barras ou quantidade*código"
-                class="h-12 w-full rounded-md border border-slate-300 px-3 text-base outline-none focus:border-blue-500"
-                @keydown.enter.prevent="handleProductEntry"
-              />
+
+              <div class="flex gap-2">
+                <input
+                  ref="productInputRef"
+                  v-model="productEntryInput"
+                  type="text"
+                  autofocus
+                  placeholder="Código de barras ou quantidade*código"
+                  class="h-12 flex-1 rounded-md border border-slate-300 px-3 text-base outline-none focus:border-blue-500"
+                  @keydown.enter.prevent="handleProductEntry"
+                />
+
+                <button
+                  type="button"
+                  class="flex h-12 min-w-[52px] items-center justify-center rounded-md border border-slate-300 bg-slate-50 text-slate-700 transition hover:bg-slate-100 active:bg-slate-200 md:hidden"
+                  aria-label="Abrir leitor de código de barras pela câmera"
+                  @click="openCameraScanner"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-6 w-6"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      d="M3 9V6a1 1 0 011-1h3M21 9V6a1 1 0 00-1-1h-3 M3 15v3a1 1 0 001 1h3M21 15v3a1 1 0 01-1 1h-3 M7 8h1v8H7zM10 8h1v8h-1zM13 8h1v8h-1zM16 8h1v8h-1z"
+                    />
+                  </svg>
+                </button>
+              </div>
+
               <p v-if="productLoading" class="mt-2 text-sm text-slate-500">Consultando produto...</p>
               <p v-if="productMessage" class="mt-2 text-sm text-slate-600">{{ productMessage }}</p>
             </div>
 
             <div class="rounded-lg border border-slate-200">
-              <div class="max-h-[420px] overflow-y-auto">
-                <table class="min-w-full text-sm">
+              <div class="hidden max-h-[420px] overflow-y-auto overflow-x-auto md:block">
+                <table class="min-w-[640px] w-full text-sm">
                   <caption class="sr-only">Itens adicionados no carrinho da venda atual</caption>
                   <thead class="sticky top-0 bg-slate-100 text-left text-slate-700">
                     <tr>
@@ -2256,7 +2448,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
                           <button
                             type="button"
                             aria-label="Diminuir quantidade"
-                            class="flex h-6 w-6 items-center justify-center rounded border border-slate-300 text-slate-700 hover:bg-slate-100"
+                            class="flex min-h-11 min-w-11 items-center justify-center rounded border border-slate-300 text-slate-700 hover:bg-slate-100"
                             @click.stop="decrementItemQuantity(item.product_id)"
                           >
                             −
@@ -2265,7 +2457,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
                           <button
                             type="button"
                             aria-label="Aumentar quantidade"
-                            class="flex h-6 w-6 items-center justify-center rounded border border-slate-300 text-slate-700 hover:bg-slate-100"
+                            class="flex min-h-11 min-w-11 items-center justify-center rounded border border-slate-300 text-slate-700 hover:bg-slate-100"
                             @click.stop="incrementItemQuantity(item.product_id)"
                           >
                             +
@@ -2284,7 +2476,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
                         <button
                           type="button"
                           :aria-label="`Remover item ${item.product_name}`"
-                          class="rounded border border-red-300 px-2 py-1 text-red-700 hover:bg-red-50"
+                          class="flex min-h-11 min-w-11 items-center justify-center rounded border border-red-300 text-red-700 hover:bg-red-50"
                           @click.stop="removeItemWithApproval(item.product_id)"
                         >
                           ✕
@@ -2299,6 +2491,65 @@ function captureScannerInput(event: KeyboardEvent): boolean {
                   </tbody>
                 </table>
               </div>
+
+              <ul class="divide-y divide-slate-100 md:hidden">
+                <li
+                  v-for="(item, index) in saleStore.items"
+                  :key="`${item.product_id}-${item.unit_price_cents}-${index}`"
+                  class="flex items-start justify-between gap-3 px-3 py-3"
+                  :class="{ 'bg-primary/5 ring-1 ring-inset ring-primary/20': selectedItemProductId === item.product_id }"
+                  @click="selectedItemProductId = item.product_id"
+                >
+                  <div class="min-w-0 flex-1">
+                    <p class="truncate text-sm font-medium text-gray-800">{{ item.product_name }}</p>
+                    <p class="mt-0.5 text-xs text-gray-500">{{ item.product_barcode || '-' }}</p>
+                    <div class="mt-1.5 flex items-center gap-2">
+                      <button
+                        type="button"
+                        aria-label="Diminuir quantidade"
+                        class="flex h-7 w-7 items-center justify-center rounded border text-sm font-bold text-gray-600 active:bg-gray-200"
+                        :disabled="item.is_bulk"
+                        @click.stop="decrementItemQuantity(item.product_id)"
+                      >
+                        −
+                      </button>
+                      <span class="w-10 text-center text-sm font-semibold">
+                        {{ item.is_bulk ? item.quantity.toFixed(3) : item.quantity }}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label="Aumentar quantidade"
+                        class="flex h-7 w-7 items-center justify-center rounded border text-sm font-bold text-gray-600 active:bg-gray-200"
+                        :disabled="item.is_bulk"
+                        @click.stop="incrementItemQuantity(item.product_id)"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="flex shrink-0 flex-col items-end gap-2">
+                    <span class="text-sm font-bold text-gray-900">
+                      {{ formatCents((item.is_bulk ? (item.total_cents || 0) : (item.unit_price_cents * item.quantity)) - item.discount_cents) }}
+                    </span>
+                    <span class="text-xs text-gray-400">
+                      {{ formatCents(item.unit_price_cents) }}/{{ item.is_bulk ? "kg" : "un" }}
+                    </span>
+                    <button
+                      type="button"
+                      :aria-label="`Remover ${item.product_name} do carrinho`"
+                      class="flex h-7 w-7 items-center justify-center rounded text-red-700 active:bg-red-100"
+                      @click.stop="removeItemWithApproval(item.product_id)"
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                </li>
+
+                <li v-if="saleStore.items.length === 0" class="px-4 py-8 text-center text-sm text-gray-400">
+                  Nenhum produto adicionado ainda.
+                </li>
+              </ul>
             </div>
           </section>
 
@@ -2406,12 +2657,12 @@ function captureScannerInput(event: KeyboardEvent): boolean {
 
     <div
       v-if="showOpenCashModal"
-      class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 px-4"
+      class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="sales-open-cash-modal-title"
     >
-      <div class="w-full max-w-md rounded-xl bg-white p-5 shadow-lg">
+      <div class="mx-auto max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5 shadow-lg">
         <h2 id="sales-open-cash-modal-title" class="text-lg font-bold text-slate-900">Abertura de Caixa</h2>
         <p class="mt-1 text-sm text-slate-600">
           Informe o fundo de troco para liberar o registro de vendas.
@@ -2446,13 +2697,13 @@ function captureScannerInput(event: KeyboardEvent): boolean {
 
     <div
       v-if="showManagerPinModal"
-      class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 px-4"
+      class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="sales-manager-pin-modal-title"
       @click.self="showManagerPinModal = false"
     >
-      <div class="w-full max-w-sm rounded-xl bg-white p-5 shadow-lg">
+      <div class="mx-auto max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5 shadow-lg">
         <h2 id="sales-manager-pin-modal-title" class="text-lg font-bold text-slate-900">Aprovação de Gerente</h2>
         <p class="mt-1 text-sm text-slate-600">Informe o PIN para autorizar esta ação.</p>
 
@@ -2489,13 +2740,13 @@ function captureScannerInput(event: KeyboardEvent): boolean {
 
     <div
       v-if="showWeightModal"
-      class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 px-4"
+      class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="sales-weight-modal-title"
       @click.self="showWeightModal = false"
     >
-      <div class="w-full max-w-lg rounded-xl bg-white p-5 shadow-lg">
+      <div class="mx-auto max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-lg">
         <h2 id="sales-weight-modal-title" class="text-lg font-bold text-slate-900">
           {{ weightedProduct?.is_bulk ? "Produto a Granel" : "Pesagem de Produto" }}
         </h2>
@@ -2555,13 +2806,13 @@ function captureScannerInput(event: KeyboardEvent): boolean {
 
     <div
       v-if="showProductSearchModal"
-      class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 px-4"
+      class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="sales-product-search-modal-title"
       @click.self="showProductSearchModal = false"
     >
-      <div class="w-full max-w-2xl rounded-xl bg-white p-5 shadow-lg">
+      <div class="mx-auto max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5 shadow-lg">
         <h2 id="sales-product-search-modal-title" class="text-lg font-bold text-slate-900">Busca de Produto (F2)</h2>
 
         <input
@@ -2610,13 +2861,13 @@ function captureScannerInput(event: KeyboardEvent): boolean {
 
     <div
       v-if="showPaymentModal"
-      class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 px-4"
+      class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="sales-payment-modal-title"
       @click.self="!paymentSuccess && (showPaymentModal = false)"
     >
-      <div class="w-full max-w-3xl rounded-xl bg-white p-5 shadow-lg">
+      <div class="mx-auto max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-5 shadow-lg">
         <h2 id="sales-payment-modal-title" class="text-lg font-bold text-slate-900">Pagamento e Finalização</h2>
 
         <div v-if="paymentSuccess" class="mt-4 rounded-lg border border-green-200 bg-green-50 p-4">
@@ -2690,7 +2941,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
                 <label class="mb-1 block text-xs font-semibold text-slate-700">Maquininha *</label>
                 <select
                   v-model="row.card_machine_id"
-                  class="h-10 w-full rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-blue-500"
+                  class="h-10 w-full rounded-md border border-slate-300 px-3 text-base md:text-sm outline-none focus:border-blue-500"
                   :disabled="loadingCardMachines"
                 >
                   <option value="" disabled>Selecione uma maquininha ativa</option>
@@ -2703,7 +2954,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
                   <label class="mb-1 mt-3 block text-xs font-semibold text-slate-700">Parcelamento</label>
                   <select
                     v-model="row.installments"
-                    class="h-10 w-full rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-blue-500"
+                    class="h-10 w-full rounded-md border border-slate-300 px-3 text-base md:text-sm outline-none focus:border-blue-500"
                   >
                     <option
                       v-for="opt in getInstallmentOptions(row)"
@@ -2750,7 +3001,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
               <button
                 v-if="!showChangeDiscountInput && !hasAppliedChangeDiscount"
                 type="button"
-                class="h-9 rounded-md border border-slate-300 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                class="min-h-11 rounded-md border border-slate-300 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100"
                 @click="openChangeDiscountInput"
               >
                 Desconto de Troco
@@ -2763,7 +3014,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
                   type="text"
                   inputmode="numeric"
                   placeholder="R$ 0,00"
-                  class="h-10 flex-1 rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-blue-500"
+                  class="h-10 flex-1 rounded-md border border-slate-300 px-3 text-base md:text-sm outline-none focus:border-blue-500"
                   @input="handleChangeDiscountCurrencyInput"
                   @keydown.enter.prevent="confirmChangeDiscount"
                 />
@@ -2827,14 +3078,14 @@ function captureScannerInput(event: KeyboardEvent): boolean {
           <div class="mt-4 flex justify-end gap-2">
             <button
               type="button"
-              class="h-10 rounded-md border border-slate-300 px-4 text-slate-700 hover:bg-slate-100"
+              class="min-h-11 rounded-md border border-slate-300 px-4 text-slate-700 hover:bg-slate-100"
               @click="showPaymentModal = false"
             >
               Cancelar
             </button>
             <button
               type="button"
-              class="h-10 rounded-md bg-blue-700 px-4 font-semibold text-white hover:bg-blue-800 disabled:opacity-60"
+              class="min-h-11 rounded-md bg-blue-700 px-4 font-semibold text-white hover:bg-blue-800 disabled:opacity-60"
               :disabled="paymentLoading || !!fiadoInactiveCustomerError || hasFiadoInsufficientCredit"
               @click="confirmPayment"
             >
@@ -2847,13 +3098,13 @@ function captureScannerInput(event: KeyboardEvent): boolean {
 
     <div
       v-if="showPixQRCodeModal"
-      class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 px-4"
+      class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="sales-pix-qrcode-modal-title"
       @click.self="!pixQRCodeLoading && !paymentLoading && !showPixManualConfirmModal && closePixQRCodeModal()"
     >
-      <div class="w-full max-w-sm rounded-xl bg-white p-5 shadow-lg">
+      <div class="mx-auto max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5 shadow-lg">
         <h2 id="sales-pix-qrcode-modal-title" class="text-lg font-bold text-slate-900">Confirmar Pagamento Pix</h2>
 
         <div v-if="!pixQRCodeExpired" class="mt-4">
@@ -2916,7 +3167,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
           <div class="mt-4 flex justify-end gap-2">
             <button
               type="button"
-              class="h-10 rounded-md border border-slate-300 px-4 text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+              class="min-h-11 rounded-md border border-slate-300 px-4 text-slate-700 hover:bg-slate-100 disabled:opacity-50"
               :disabled="pixQRCodeLoading || paymentLoading"
               @click="closePixQRCodeModal"
             >
@@ -2924,7 +3175,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
             </button>
             <button
               type="button"
-              class="h-10 rounded-md bg-blue-700 px-4 font-semibold text-white hover:bg-blue-800 disabled:opacity-60"
+              class="min-h-11 rounded-md bg-blue-700 px-4 font-semibold text-white hover:bg-blue-800 disabled:opacity-60"
               :disabled="pixQRCodeLoading || paymentLoading"
               @click="openPixManualConfirmModal"
             >
@@ -2940,7 +3191,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
           <div class="mt-4 flex justify-end">
             <button
               type="button"
-              class="h-10 rounded-md bg-blue-700 px-4 font-semibold text-white hover:bg-blue-800"
+              class="min-h-11 rounded-md bg-blue-700 px-4 font-semibold text-white hover:bg-blue-800"
               @click="closePixQRCodeModal"
             >
               Fechar
@@ -2952,13 +3203,13 @@ function captureScannerInput(event: KeyboardEvent): boolean {
 
     <div
       v-if="showPixManualConfirmModal"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="sales-pix-manual-modal-title"
       @click.self="!paymentLoading && closePixManualConfirmModal()"
     >
-      <div class="w-full max-w-md rounded-xl bg-white p-5 shadow-lg">
+      <div class="mx-auto max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5 shadow-lg">
         <h2 id="sales-pix-manual-modal-title" class="text-lg font-bold text-slate-900">Confirmar Recebimento do Pix</h2>
 
         <div class="mt-4 space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
@@ -2976,7 +3227,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
         <div class="mt-4 flex justify-end gap-2">
           <button
             type="button"
-            class="h-10 rounded-md border border-slate-300 px-4 text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+            class="min-h-11 rounded-md border border-slate-300 px-4 text-slate-700 hover:bg-slate-100 disabled:opacity-50"
             :disabled="paymentLoading"
             @click="closePixManualConfirmModal"
           >
@@ -2984,7 +3235,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
           </button>
           <button
             type="button"
-            class="h-10 rounded-md bg-blue-700 px-4 font-semibold text-white hover:bg-blue-800 disabled:opacity-60"
+            class="min-h-11 rounded-md bg-blue-700 px-4 font-semibold text-white hover:bg-blue-800 disabled:opacity-60"
             :disabled="paymentLoading"
             @click="confirmPixReceivedManual"
           >
@@ -2996,13 +3247,13 @@ function captureScannerInput(event: KeyboardEvent): boolean {
 
     <div
       v-if="showCashOutModal || showCashInModal"
-      class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 px-4"
+      class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="sales-cash-movement-modal-title"
       @click.self="closeCashMovementModal"
     >
-      <div class="w-full max-w-md rounded-xl bg-white p-5 shadow-lg">
+      <div class="mx-auto max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5 shadow-lg">
         <h2 id="sales-cash-movement-modal-title" class="text-lg font-bold text-slate-900">
           {{ showCashOutModal ? "Sangria" : "Suprimento" }}
         </h2>
@@ -3053,13 +3304,13 @@ function captureScannerInput(event: KeyboardEvent): boolean {
 
     <div
       v-if="showCustomerListModal"
-      class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 px-4"
+      class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="sales-customer-list-modal-title"
       @click.self="showCustomerListModal = false"
     >
-      <div class="w-full max-w-2xl rounded-xl bg-white p-5 shadow-lg">
+      <div class="mx-auto max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5 shadow-lg">
         <h2 id="sales-customer-list-modal-title" class="text-lg font-bold text-slate-900">Clientes Cadastrados</h2>
 
         <input
@@ -3108,6 +3359,110 @@ function captureScannerInput(event: KeyboardEvent): boolean {
             Fechar
           </button>
         </div>
+      </div>
+    </div>
+
+    <Teleport to="body">
+      <div
+        v-if="showCameraScanner"
+        class="fixed inset-0 z-50 flex flex-col bg-black"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Leitor de código de barras"
+      >
+        <div class="flex items-center justify-between bg-black/80 px-4 py-3">
+          <p class="text-sm font-semibold text-white">Aponte para o código de barras</p>
+          <button
+            type="button"
+            class="flex min-h-11 min-w-11 items-center justify-center rounded-full text-white hover:bg-white/10"
+            aria-label="Fechar leitor de câmera"
+            @click="closeCameraScanner"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div class="relative flex-1 overflow-hidden">
+          <video
+            ref="cameraVideoRef"
+            class="h-full w-full object-cover"
+            playsinline
+            muted
+            autoplay
+          />
+
+          <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div class="relative h-48 w-72">
+              <span class="absolute left-0 top-0 h-8 w-8 rounded-tl-lg border-l-4 border-t-4 border-white" />
+              <span class="absolute right-0 top-0 h-8 w-8 rounded-tr-lg border-r-4 border-t-4 border-white" />
+              <span class="absolute bottom-0 left-0 h-8 w-8 rounded-bl-lg border-b-4 border-l-4 border-white" />
+              <span class="absolute bottom-0 right-0 h-8 w-8 rounded-br-lg border-b-4 border-r-4 border-white" />
+              <span class="absolute inset-x-2 top-1/2 h-0.5 animate-pulse bg-red-500/80" />
+            </div>
+          </div>
+
+          <div class="absolute inset-x-0 bottom-4 flex justify-center">
+            <p
+              v-if="isScanning && !cameraError"
+              class="rounded-full bg-black/60 px-4 py-2 text-sm text-white"
+            >
+              Buscando código de barras...
+            </p>
+            <p
+              v-if="cameraError"
+              role="alert"
+              class="rounded-full bg-danger/80 px-4 py-2 text-sm text-white"
+            >
+              {{ cameraError }}
+            </p>
+          </div>
+        </div>
+
+        <div class="bg-black/80 px-4 py-4">
+          <button
+            type="button"
+            class="w-full min-h-11 rounded-xl border border-white/30 text-sm font-semibold text-white transition hover:bg-white/10"
+            @click="closeCameraScanner"
+          >
+            Cancelar leitura
+          </button>
+        </div>
+      </div>
+    </Teleport>
+  </div>
+
+  <div id="print-receipt" class="hidden p-6 font-mono text-sm print:block">
+    <div class="mb-4 text-center">
+      <p class="text-lg font-bold">{{ storeName }}</p>
+      <p class="text-xs text-gray-500">{{ storeAddress }}</p>
+      <p class="text-xs text-gray-500">{{ storePhone }}</p>
+      <div class="my-2 border-t border-dashed"></div>
+      <p class="text-base font-bold">COMPROVANTE DE VENDA</p>
+      <p class="text-xs text-gray-500">Documento sem valor fiscal</p>
+      <p class="text-xs">Nº {{ printReceiptNumber }}</p>
+      <p class="text-xs">{{ printDateTime }}</p>
+    </div>
+
+    <div class="mb-3 border-t border-dashed pt-2">
+      <p class="mb-1 text-xs font-semibold">Itens</p>
+      <div v-for="(item, index) in saleStore.items" :key="`print-${item.product_id}-${index}`" class="mb-1 text-xs">
+        <p>{{ item.product_name }}</p>
+        <p class="text-[11px] text-gray-600">
+          {{ item.is_bulk ? item.quantity.toFixed(3) : item.quantity }} x {{ formatCents(item.unit_price_cents) }}
+          = {{ formatCents((item.is_bulk ? (item.total_cents || 0) : (item.unit_price_cents * item.quantity)) - item.discount_cents) }}
+        </p>
+      </div>
+      <p v-if="saleStore.items.length === 0" class="text-xs text-gray-500">Sem itens registrados.</p>
+    </div>
+
+    <div class="border-t border-dashed pt-2 text-xs">
+      <div class="flex items-center justify-between">
+        <span>Subtotal</span>
+        <strong>{{ formatCents(subtotalCents) }}</strong>
+      </div>
+      <div class="flex items-center justify-between">
+        <span>Total</span>
+        <strong>{{ formatCents(totalCents) }}</strong>
       </div>
     </div>
   </div>

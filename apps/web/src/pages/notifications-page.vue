@@ -200,24 +200,24 @@ onMounted(() => {
             v-model="searchQuery"
             type="search"
             placeholder="Buscar por texto..."
-            class="min-w-[200px] flex-1 rounded border border-gray-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            class="min-w-[200px] flex-1 rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             aria-label="Buscar notificações por texto"
           />
           <input
             v-model="fromDate"
             type="date"
-            class="rounded border border-gray-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            class="rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             aria-label="Data inicial"
           />
           <input
             v-model="toDate"
             type="date"
-            class="rounded border border-gray-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            class="rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             aria-label="Data final"
           />
           <button
             type="button"
-            class="rounded border border-gray-300 px-3 py-2 text-sm text-gray-600 transition hover:bg-gray-50 focus:outline-none"
+            class="min-h-11 inline-flex items-center rounded border border-gray-300 px-3 py-2 text-sm text-gray-600 transition hover:bg-gray-50 focus:outline-none"
             @click="handleMarkAllRead"
           >
             Marcar tudo como lido
@@ -250,7 +250,7 @@ onMounted(() => {
             <div class="flex flex-wrap items-start gap-3">
               <!-- Ícone e severidade -->
               <div class="flex items-center gap-2">
-                <span class="text-xl leading-none">{{ severityIcon(notification.severity) }}</span>
+                <span class="text-xl leading-none select-none" aria-hidden="true">{{ severityIcon(notification.severity) }}</span>
                 <span :class="['text-xs font-bold', severityTextClass(notification.severity)]">
                   {{ severityLabel(notification.severity) }}
                 </span>
@@ -273,7 +273,7 @@ onMounted(() => {
                   </span>
                 </div>
                 <p class="mt-1 text-sm text-gray-600">{{ notification.message }}</p>
-                <p class="mt-1 text-xs text-gray-400">{{ formatRelativeTime(notification.created_at) }}</p>
+                <p class="mt-1 text-xs text-gray-500">{{ formatRelativeTime(notification.created_at) }}</p>
               </div>
 
               <!-- Ações -->
@@ -281,7 +281,7 @@ onMounted(() => {
                 <RouterLink
                   v-if="navigateMeta(notification)"
                   :to="navigateMeta(notification)!"
-                  class="rounded border border-primary px-3 py-1 text-xs font-medium text-primary transition hover:bg-primary hover:text-white focus:outline-none"
+                  class="min-h-11 inline-flex items-center rounded border border-primary px-3 py-1 text-xs font-medium text-primary transition hover:bg-primary hover:text-white focus:outline-none"
                   @click="handleMarkAsRead(notification)"
                 >
                   Ver
@@ -289,7 +289,7 @@ onMounted(() => {
                 <button
                   v-if="!notification.read_at"
                   type="button"
-                  class="rounded border border-gray-300 px-3 py-1 text-xs text-gray-600 transition hover:bg-gray-100 focus:outline-none"
+                  class="min-h-11 inline-flex items-center rounded border border-gray-300 px-3 py-1 text-xs text-gray-600 transition hover:bg-gray-100 focus:outline-none"
                   @click="handleMarkAsRead(notification)"
                 >
                   Marcar lido
@@ -297,7 +297,7 @@ onMounted(() => {
                 <button
                   v-if="canAcknowledge && notification.severity === 'critical' && !notification.acknowledged_by"
                   type="button"
-                  class="rounded border border-success px-3 py-1 text-xs font-medium text-success transition hover:bg-success hover:text-white focus:outline-none"
+                  class="min-h-11 inline-flex items-center rounded border border-success px-3 py-1 text-xs font-medium text-success transition hover:bg-success hover:text-white focus:outline-none"
                   @click="handleAcknowledge(notification)"
                 >
                   Confirmar
@@ -316,7 +316,7 @@ onMounted(() => {
           <button
             type="button"
             :disabled="currentPage <= 1"
-            class="rounded border border-gray-300 px-3 py-1 text-sm text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none"
+            class="min-h-11 inline-flex items-center rounded border border-gray-300 px-3 py-1 text-sm text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none"
             @click="currentPage--"
           >
             ← Anterior
@@ -329,7 +329,7 @@ onMounted(() => {
           <button
             type="button"
             :disabled="currentPage >= pagination.total_pages"
-            class="rounded border border-gray-300 px-3 py-1 text-sm text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none"
+            class="min-h-11 inline-flex items-center rounded border border-gray-300 px-3 py-1 text-sm text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none"
             @click="currentPage++"
           >
             Próxima →

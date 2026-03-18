@@ -11,8 +11,8 @@ import { useToast } from "@/composables/use-toast.js";
 import { useAuthStore } from "@/stores/auth.store.js";
 
 type PixKeyType = "cpf" | "cnpj" | "email" | "phone" | "random";
-type MainTabKey = "settings" | "payment-methods";
-type PaymentTabKey = "pix" | "card-machines" | "fiado";
+type MainTabKey = "settings" | "payment-methods" | "alerts";
+type PaymentTabKey = "pix" | "card-machines" | "fiado" | "whatsapp" | "change-discount";
 
 interface CardMachineFormData {
   name: string;
@@ -73,6 +73,8 @@ interface GeneralSettingsResponse {
   refund_alert_limit_cents: number;
   fiado_alert_at_90_percent: boolean;
   fiado_alert_on_due_day: boolean;
+  whatsapp_message_fiado_vencido: string;
+  whatsapp_message_fiado_a_vencer: string;
   stock_alert_type_settings: Record<string, number>;
   stock_alert_type_pct_settings?: Record<string, number>;
 }
@@ -86,6 +88,8 @@ interface ProductStockUnitInfo {
   product_type_id: string | null;
   is_bulk: boolean;
 }
+
+type WhatsAppTemplateField = "whatsapp_message_fiado_vencido" | "whatsapp_message_fiado_a_vencer";
 
 const { authenticatedFetch } = useApi();
 const authStore = useAuthStore();
@@ -116,6 +120,7 @@ const generalSettingsSaving = ref(false);
 const generalSettingsError = ref<string | null>(null);
 const systemSubmitError = ref<string | null>(null);
 const fiadoSubmitError = ref<string | null>(null);
+const whatsappSubmitError = ref<string | null>(null);
 const alertsSaving = ref(false);
 const alertsSubmitError = ref<string | null>(null);
 
@@ -134,6 +139,11 @@ const fiadoForm = ref({
   fiado_max_days: "",
   fiado_allow_inactive: false,
   fiado_blocked_message: "",
+});
+
+const whatsappForm = ref({
+  whatsapp_message_fiado_vencido: "",
+  whatsapp_message_fiado_a_vencer: "",
 });
 
 const alertsForm = ref({
@@ -186,6 +196,34 @@ const cardMachineSubmitLoading = ref(false);
 const currentAdminName = computed(() => authStore.user?.name?.trim() || "Administrador");
 
 const isCardMachinesTab = computed(() => activePaymentTab.value === "card-machines");
+const whatsappVencidoTextarea = ref<HTMLTextAreaElement | null>(null);
+const whatsappAVencerTextarea = ref<HTMLTextAreaElement | null>(null);
+const whatsappTokenButtons = [
+  { label: "+ Nome do Cliente", token: "[NOME]" },
+  { label: "+ Valor Total", token: "[TOTAL]" },
+  { label: "+ Valor da Cobrança", token: "[COBRANCA]" },
+  { label: "+ Data de Vencimento", token: "[VENCIMENTO]" },
+] as const;
+const whatsappMessageDefaults: Record<WhatsAppTemplateField, string> = {
+  whatsapp_message_fiado_vencido:
+    "Olá [NOME], notamos que o seu fiado de [TOTAL] venceu em [VENCIMENTO]. Como podemos te ajudar a regularizar?",
+  whatsapp_message_fiado_a_vencer:
+    "Olá [NOME], passando para lembrar que o seu fiado de [TOTAL] vence em [VENCIMENTO]. Se precisar, estamos à disposição.",
+};
+const whatsappPreviewValues: Record<string, string> = {
+  "[NOME]": "Fulano",
+  "[TOTAL]": "R$ 50,00",
+  "[COBRANCA]": "R$ 20,00",
+  "[VENCIMENTO]": "25/03/2026",
+};
+
+const whatsappPreviewVencido = computed(() =>
+  buildWhatsappPreview(whatsappForm.value.whatsapp_message_fiado_vencido, "whatsapp_message_fiado_vencido"),
+);
+
+const whatsappPreviewAVencer = computed(() =>
+  buildWhatsappPreview(whatsappForm.value.whatsapp_message_fiado_a_vencer, "whatsapp_message_fiado_a_vencer"),
+);
 
 const ratePreviewItems = computed(() => {
   const baseRate = parseRateInput(cardMachineFormData.value.rates.credit_base_rate);
@@ -628,6 +666,69 @@ function handleTypePctInput(productTypeId: string, event: Event): void {
   alertTypePctLimitForm.value[productTypeId] = Number.isNaN(parsed) ? "" : String(Math.min(100, parsed));
 }
 
+function getWhatsappDefaultMessage(field: WhatsAppTemplateField): string {
+  return whatsappMessageDefaults[field];
+}
+
+function getWhatsappMessageLength(field: WhatsAppTemplateField): number {
+  return whatsappForm.value[field].length;
+}
+
+function ensureWhatsappMessageDefault(field: WhatsAppTemplateField): void {
+  if (whatsappForm.value[field].trim()) {
+    return;
+  }
+
+  whatsappForm.value[field] = getWhatsappDefaultMessage(field);
+}
+
+function restoreWhatsappDefault(field: WhatsAppTemplateField): void {
+  whatsappForm.value[field] = getWhatsappDefaultMessage(field);
+}
+
+function getWhatsappTextarea(field: WhatsAppTemplateField): HTMLTextAreaElement | null {
+  if (field === "whatsapp_message_fiado_vencido") {
+    return whatsappVencidoTextarea.value;
+  }
+
+  return whatsappAVencerTextarea.value;
+}
+
+function insertWhatsappToken(field: WhatsAppTemplateField, token: string): void {
+  ensureWhatsappMessageDefault(field);
+
+  const textarea = getWhatsappTextarea(field);
+  const currentValue = whatsappForm.value[field];
+
+  if (!textarea) {
+    whatsappForm.value[field] = `${currentValue} ${token}`.trim();
+    return;
+  }
+
+  const selectionStart = textarea.selectionStart ?? currentValue.length;
+  const selectionEnd = textarea.selectionEnd ?? currentValue.length;
+  const nextValue =
+    currentValue.slice(0, selectionStart) +
+    token +
+    currentValue.slice(selectionEnd);
+
+  whatsappForm.value[field] = nextValue;
+
+  requestAnimationFrame(() => {
+    textarea.focus();
+    const cursorPosition = selectionStart + token.length;
+    textarea.setSelectionRange(cursorPosition, cursorPosition);
+  });
+}
+
+function buildWhatsappPreview(message: string, field: WhatsAppTemplateField): string {
+  const baseMessage = message.trim() || getWhatsappDefaultMessage(field);
+
+  return Object.entries(whatsappPreviewValues).reduce((preview, [token, value]) => {
+    return preview.replaceAll(token, value);
+  }, baseMessage);
+}
+
 async function loadAlertTypeMetadata(): Promise<void> {
   try {
     const typeResponse = await authenticatedFetch("/api/product-types");
@@ -720,6 +821,13 @@ async function loadGeneralSettings(): Promise<void> {
       fiado_max_days: settings.fiado_max_days > 0 ? String(settings.fiado_max_days) : "",
       fiado_allow_inactive: settings.fiado_allow_inactive,
       fiado_blocked_message: settings.fiado_blocked_message || "",
+    };
+
+    whatsappForm.value = {
+      whatsapp_message_fiado_vencido:
+        settings.whatsapp_message_fiado_vencido || getWhatsappDefaultMessage("whatsapp_message_fiado_vencido"),
+      whatsapp_message_fiado_a_vencer:
+        settings.whatsapp_message_fiado_a_vencer || getWhatsappDefaultMessage("whatsapp_message_fiado_a_vencer"),
     };
 
     alertsForm.value = {
@@ -832,6 +940,39 @@ async function saveFiadoSettings(): Promise<void> {
     await loadGeneralSettings();
   } catch {
     fiadoSubmitError.value = "Erro de conexão ao salvar configurações de fiado.";
+  } finally {
+    generalSettingsSaving.value = false;
+  }
+}
+
+async function saveWhatsappSettings(): Promise<void> {
+  generalSettingsSaving.value = true;
+  whatsappSubmitError.value = null;
+
+  try {
+    const response = await authenticatedFetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        whatsapp_message_fiado_vencido:
+          (whatsappForm.value.whatsapp_message_fiado_vencido.trim() ||
+            getWhatsappDefaultMessage("whatsapp_message_fiado_vencido")),
+        whatsapp_message_fiado_a_vencer:
+          (whatsappForm.value.whatsapp_message_fiado_a_vencer.trim() ||
+            getWhatsappDefaultMessage("whatsapp_message_fiado_a_vencer")),
+      }),
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      whatsappSubmitError.value = data.message || "Não foi possível salvar as mensagens de WhatsApp.";
+      return;
+    }
+
+    showSuccessToast("Mensagens de WhatsApp salvas com sucesso!");
+    await loadGeneralSettings();
+  } catch {
+    whatsappSubmitError.value = "Erro de conexão ao salvar mensagens de WhatsApp.";
   } finally {
     generalSettingsSaving.value = false;
   }
@@ -1372,71 +1513,111 @@ function changePaymentTab(tab: PaymentTabKey): void {
           <h1 class="text-3xl font-bold text-gray-900">Configurações</h1>
         </div>
 
-        <div class="mt-6 flex items-center gap-2 border-b border-gray-200">
-          <button
-            type="button"
-            :class="[
-              'rounded-t-lg px-4 py-2 text-sm font-semibold transition',
-              activeMainTab === 'settings'
-                ? 'bg-primary text-white'
-                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
-            ]"
-            @click="changeMainTab('settings')"
-          >
-            Configurações do Sistema
-          </button>
-          <button
-            type="button"
-            :class="[
-              'rounded-t-lg px-4 py-2 text-sm font-semibold transition',
-              activeMainTab === 'payment-methods'
-                ? 'bg-primary text-white'
-                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
-            ]"
-            @click="changeMainTab('payment-methods')"
-          >
-            Meios de Pagamento
-          </button>
+        <div class="mt-6 overflow-x-auto -mx-3 px-3 md:mx-0 md:px-0">
+          <div class="flex gap-1 min-w-max md:min-w-0 border-b border-gray-200">
+            <button
+              type="button"
+              :class="[
+                'min-h-11 whitespace-nowrap rounded-t-lg px-4 py-2 text-sm font-semibold transition',
+                activeMainTab === 'settings'
+                  ? 'bg-primary text-white'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+              ]"
+              @click="changeMainTab('settings')"
+            >
+              Info. Comércio
+            </button>
+            <button
+              type="button"
+              :class="[
+                'min-h-11 whitespace-nowrap rounded-t-lg px-4 py-2 text-sm font-semibold transition',
+                activeMainTab === 'payment-methods'
+                  ? 'bg-primary text-white'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+              ]"
+              @click="changeMainTab('payment-methods')"
+            >
+              Meios de Pagamento
+            </button>
+            <button
+              type="button"
+              :class="[
+                'min-h-11 whitespace-nowrap rounded-t-lg px-4 py-2 text-sm font-semibold transition',
+                activeMainTab === 'alerts'
+                  ? 'bg-primary text-white'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+              ]"
+              @click="changeMainTab('alerts')"
+            >
+              Alertas e Notificações
+            </button>
+          </div>
         </div>
 
         <section v-if="activeMainTab === 'payment-methods'" class="mt-4">
-          <div class="flex flex-wrap items-center gap-3 border-b border-gray-200 bg-surface/70 px-1">
-            <button
-              type="button"
-              :class="[
-                'rounded-t-md border-b-2 px-3 py-2 text-sm font-medium transition',
-                activePaymentTab === 'pix'
-                  ? 'border-primary bg-white text-primary'
-                  : 'border-transparent text-gray-600 hover:border-gray-300 hover:text-gray-900',
-              ]"
-              @click="changePaymentTab('pix')"
-            >
-              Pix
-            </button>
-            <button
-              type="button"
-              :class="[
-                'rounded-t-md border-b-2 px-3 py-2 text-sm font-medium transition',
-                activePaymentTab === 'card-machines'
-                  ? 'border-primary bg-white text-primary'
-                  : 'border-transparent text-gray-600 hover:border-gray-300 hover:text-gray-900',
-              ]"
-              @click="changePaymentTab('card-machines')"
-            >
-              Taxas Maquineta
-            </button>
-            <button
-              type="button"
-              :class="[
-                'rounded-t-md border-b-2 px-3 py-2 text-sm font-medium transition',
-                activePaymentTab === 'fiado'
-                  ? 'border-primary bg-white text-primary'
-                  : 'border-transparent text-gray-600 hover:border-gray-300 hover:text-gray-900',
-              ]"
-              @click="changePaymentTab('fiado')"
-            >
-              Fiado
-            </button>
+          <div class="overflow-x-auto -mx-3 px-3 md:mx-0 md:px-0 bg-surface/70">
+            <div class="flex gap-1 min-w-max md:min-w-0 border-b border-gray-200 px-1">
+              <button
+                type="button"
+                :class="[
+                  'min-h-11 whitespace-nowrap rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition',
+                  activePaymentTab === 'pix'
+                    ? 'border-primary bg-white text-primary'
+                    : 'border-transparent text-gray-600 hover:border-gray-300 hover:text-gray-900',
+                ]"
+                @click="changePaymentTab('pix')"
+              >
+                Pix
+              </button>
+              <button
+                type="button"
+                :class="[
+                  'min-h-11 whitespace-nowrap rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition',
+                  activePaymentTab === 'card-machines'
+                    ? 'border-primary bg-white text-primary'
+                    : 'border-transparent text-gray-600 hover:border-gray-300 hover:text-gray-900',
+                ]"
+                @click="changePaymentTab('card-machines')"
+              >
+                Taxas Maquineta
+              </button>
+              <button
+                type="button"
+                :class="[
+                  'min-h-11 whitespace-nowrap rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition',
+                  activePaymentTab === 'fiado'
+                    ? 'border-primary bg-white text-primary'
+                    : 'border-transparent text-gray-600 hover:border-gray-300 hover:text-gray-900',
+                ]"
+                @click="changePaymentTab('fiado')"
+              >
+                Fiado
+              </button>
+              <button
+                type="button"
+                :class="[
+                  'min-h-11 whitespace-nowrap rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition',
+                  activePaymentTab === 'whatsapp'
+                    ? 'border-primary bg-white text-primary'
+                    : 'border-transparent text-gray-600 hover:border-gray-300 hover:text-gray-900',
+                ]"
+                @click="changePaymentTab('whatsapp')"
+              >
+                Mensagens WhatsApp
+              </button>
+              <button
+                type="button"
+                :class="[
+                  'min-h-11 whitespace-nowrap rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition',
+                  activePaymentTab === 'change-discount'
+                    ? 'border-primary bg-white text-primary'
+                    : 'border-transparent text-gray-600 hover:border-gray-300 hover:text-gray-900',
+                ]"
+                @click="changePaymentTab('change-discount')"
+              >
+                Desconto de Troco
+              </button>
+            </div>
           </div>
         </section>
 
@@ -1476,7 +1657,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                     v-model="systemForm.store_name"
                     type="text"
                     maxlength="120"
-                    class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   />
                 </div>
 
@@ -1488,7 +1669,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                     type="text"
                     inputmode="numeric"
                     placeholder="00.000.000/0000-00"
-                    class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                     @input="handleStoreCnpjInput"
                   />
                 </div>
@@ -1500,7 +1681,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                     v-model="systemForm.store_address"
                     type="text"
                     maxlength="180"
-                    class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   />
                 </div>
 
@@ -1512,7 +1693,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                     type="text"
                     inputmode="numeric"
                     placeholder="(81) 9 9999-9999"
-                    class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                     @input="handleStorePhoneInput"
                   />
                 </div>
@@ -1524,11 +1705,37 @@ function changePaymentTab(tab: PaymentTabKey): void {
                     v-model="systemForm.receipt_footer"
                     type="text"
                     maxlength="255"
-                    class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   />
                 </div>
               </div>
 
+              <div class="flex justify-end">
+                <button
+                  type="submit"
+                  class="w-full sm:w-auto min-h-11 inline-flex items-center justify-center rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark disabled:opacity-50"
+                  :disabled="generalSettingsSaving"
+                >
+                  {{ generalSettingsSaving ? "Salvando..." : "Salvar Configurações" }}
+                </button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <section
+          v-if="activeMainTab === 'payment-methods' && activePaymentTab === 'change-discount'"
+          class="mt-6"
+        >
+          <div class="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+            <h2 class="text-2xl font-bold text-gray-900">Desconto de Troco</h2>
+            <p class="mt-1 text-sm text-gray-600">Configure os limites de desconto operacional por período.</p>
+
+            <p v-if="systemSubmitError" class="mt-4 rounded bg-red-100 p-3 text-sm text-danger" role="alert">
+              {{ systemSubmitError }}
+            </p>
+
+            <form class="mt-6 space-y-6" @submit.prevent="saveSystemSettings">
               <div class="rounded-lg border border-gray-200 p-4">
                 <h3 class="text-sm font-semibold text-gray-800">Limites de Desconto</h3>
                 <div class="mt-3 grid gap-4 md:grid-cols-3">
@@ -1540,7 +1747,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                       type="text"
                       inputmode="numeric"
                       placeholder="R$ 0,00"
-                      class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                       @input="(event) => handleDiscountLimitInput(event, 'discount_limit_daily')"
                     />
                   </div>
@@ -1553,7 +1760,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                       type="text"
                       inputmode="numeric"
                       placeholder="R$ 0,00"
-                      class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                       @input="(event) => handleDiscountLimitInput(event, 'discount_limit_weekly')"
                     />
                   </div>
@@ -1566,7 +1773,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                       type="text"
                       inputmode="numeric"
                       placeholder="R$ 0,00"
-                      class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                       @input="(event) => handleDiscountLimitInput(event, 'discount_limit_monthly')"
                     />
                   </div>
@@ -1576,7 +1783,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
               <div class="flex justify-end">
                 <button
                   type="submit"
-                  class="rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark disabled:opacity-50"
+                  class="w-full sm:w-auto min-h-11 inline-flex items-center justify-center rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark disabled:opacity-50"
                   :disabled="generalSettingsSaving"
                 >
                   {{ generalSettingsSaving ? "Salvando..." : "Salvar Configurações" }}
@@ -1650,7 +1857,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                   <select
                     id="pix_key_type"
                     v-model="formData.pix_key_type"
-                    class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                     @change="handlePixKeyTypeChange"
                   >
                     <option value="" disabled>Selecione o tipo de chave</option>
@@ -1672,7 +1879,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                     :inputmode="pixKeyInputMode"
                     :placeholder="pixKeyPlaceholder"
                     :disabled="!formData.pix_key_type"
-                    class="w-full rounded border border-gray-300 px-3 py-2 disabled:cursor-not-allowed disabled:bg-gray-100 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm disabled:cursor-not-allowed disabled:bg-gray-100 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                     @input="handlePixKeyInput"
                   />
                   <p class="mt-1 text-xs text-gray-500">{{ pixKeyStorageHint }}</p>
@@ -1690,7 +1897,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                     v-model="formData.merchant_name"
                     type="text"
                     maxlength="25"
-                    class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   />
                   <p class="mt-1 text-xs text-gray-500">Máximo de 25 caracteres.</p>
                   <div v-if="formErrors.merchant_name" class="mt-1 text-xs text-danger" role="alert">
@@ -1705,7 +1912,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                     v-model="formData.merchant_city"
                     type="text"
                     maxlength="15"
-                    class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   />
                   <p class="mt-1 text-xs text-gray-500">Máximo de 15 caracteres.</p>
                   <div v-if="formErrors.merchant_city" class="mt-1 text-xs text-danger" role="alert">
@@ -1725,7 +1932,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                 </button>
                 <button
                   type="submit"
-                  class="rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
+                  class="w-full sm:w-auto min-h-11 inline-flex items-center justify-center rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
                   :disabled="loadingSubmit"
                 >
                   Salvar
@@ -1739,17 +1946,11 @@ function changePaymentTab(tab: PaymentTabKey): void {
           v-if="activeMainTab === 'payment-methods' && isCardMachinesTab"
           class="mt-6"
         >
-          <div class="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <h2 class="text-2xl font-bold text-gray-900">Configuração de Maquininhas</h2>
-              <p class="mt-1 text-sm text-gray-600">
-                Cadastre as maquininhas e configure taxas para apuração correta de lucro e valor final da venda.
-              </p>
-            </div>
-
+          <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <h2 class="text-lg font-semibold text-gray-900 sm:text-xl">Taxas Maquineta</h2>
             <button
               type="button"
-              class="rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark"
+              class="w-full sm:w-auto min-h-11 inline-flex items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-white transition hover:bg-primary-dark"
               @click="openCreateCardMachineModal"
             >
               + Nova Máquina
@@ -1775,85 +1976,173 @@ function changePaymentTab(tab: PaymentTabKey): void {
             </button>
           </div>
 
-          <div v-else class="mt-6 overflow-x-auto rounded-lg border border-gray-200 bg-white">
-            <table class="w-full min-w-[1100px]">
-              <caption class="sr-only">Lista de maquininhas de cartao cadastradas</caption>
-              <thead class="bg-gray-50">
-                <tr>
-                  <th scope="col" class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Nome</th>
-                  <th scope="col" class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Status</th>
-                  <th scope="col" class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Comportamento da Taxa</th>
-                  <th scope="col" class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Taxa Débito</th>
-                  <th scope="col" class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Taxa Crédito (base)</th>
-                  <th scope="col" class="px-4 py-3 text-center text-sm font-semibold text-gray-700">Ações</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-200">
-                <tr v-for="machine in cardMachines" :key="machine.id" class="hover:bg-gray-50">
-                  <td class="px-4 py-3 text-sm text-gray-900">{{ machine.name }}</td>
-                  <td class="px-4 py-3">
-                    <span
-                      :class="[
-                        'inline-block rounded-full px-3 py-1 text-xs font-semibold',
-                        machine.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-700',
-                      ]"
-                    >
-                      {{ machine.is_active ? "Ativa" : "Inativa" }}
-                    </span>
-                  </td>
-                  <td class="px-4 py-3 text-sm text-gray-700">
-                    {{ machine.absorb_fee ? "Absorver" : "Repassar ao cliente" }}
-                  </td>
-                  <td class="px-4 py-3 text-sm text-gray-800">
-                    {{ `${machine.rates[0]?.debit_rate ?? 0}%` }}
-                  </td>
-                  <td class="px-4 py-3 text-sm font-medium text-primary">
-                    {{ `${machine.rates[0]?.credit_base_rate ?? 0}%` }}
-                  </td>
-                  <td class="px-4 py-3">
-                    <div class="flex items-center justify-center gap-2">
-                      <button
-                        type="button"
-                        class="rounded p-2 text-primary transition hover:bg-primary/10"
-                        title="Editar maquininha"
-                        :aria-label="`Editar maquininha ${machine.name}`"
-                        @click="openEditCardMachineModal(machine)"
-                      >
-                        ✏️
-                      </button>
-                      <button
-                        type="button"
+          <div v-else class="mt-6">
+            <!-- TABELA — apenas md+ -->
+            <div class="hidden md:block overflow-x-auto rounded-lg border border-gray-200 bg-white">
+              <table class="w-full min-w-[1100px]">
+                <caption class="sr-only">Lista de maquininhas de cartao cadastradas</caption>
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th scope="col" class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Nome</th>
+                    <th scope="col" class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Status</th>
+                    <th scope="col" class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Comportamento da Taxa</th>
+                    <th scope="col" class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Taxa Débito</th>
+                    <th scope="col" class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Taxa Crédito (base)</th>
+                    <th scope="col" class="px-4 py-3 text-center text-sm font-semibold text-gray-700">Ações</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                  <tr v-for="machine in cardMachines" :key="machine.id" class="hover:bg-gray-50">
+                    <td class="px-4 py-3 text-sm text-gray-900">{{ machine.name }}</td>
+                    <td class="px-4 py-3">
+                      <span
                         :class="[
-                          'rounded px-2 py-1 text-xs font-medium transition',
-                          machine.is_active
-                            ? 'border border-amber-300 text-amber-700 hover:bg-amber-50'
-                            : 'border border-green-300 text-green-700 hover:bg-green-50',
+                          'inline-block rounded-full px-3 py-1 text-xs font-semibold',
+                          machine.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-700',
                         ]"
-                        :title="machine.is_active ? 'Desativar maquininha' : 'Ativar maquininha'"
-                        @click="toggleCardMachineActive(machine)"
                       >
-                        {{ machine.is_active ? "Desativar" : "Ativar" }}
-                      </button>
-                      <button
-                        v-if="authStore.user?.role === 'admin'"
-                        type="button"
-                        class="rounded p-2 text-danger transition hover:bg-red-50"
-                        title="Excluir maquininha permanentemente"
-                        :aria-label="`Excluir maquininha ${machine.name}`"
-                        @click="deleteCardMachine(machine)"
-                      >
-                        🗑️
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-                <tr v-if="cardMachines.length === 0">
-                  <td colspan="6" class="px-4 py-6 text-center text-sm text-gray-500">
-                    Nenhuma maquininha cadastrada até o momento.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                        {{ machine.is_active ? "Ativa" : "Inativa" }}
+                      </span>
+                    </td>
+                    <td class="px-4 py-3 text-sm text-gray-700">
+                      {{ machine.absorb_fee ? "Absorver" : "Repassar ao cliente" }}
+                    </td>
+                    <td class="px-4 py-3 text-sm text-gray-800">
+                      {{ `${machine.rates[0]?.debit_rate ?? 0}%` }}
+                    </td>
+                    <td class="px-4 py-3 text-sm font-medium text-primary">
+                      {{ `${machine.rates[0]?.credit_base_rate ?? 0}%` }}
+                    </td>
+                    <td class="px-4 py-3">
+                      <div class="flex items-center justify-center gap-2">
+                        <button
+                          type="button"
+                          class="rounded p-2 text-primary transition hover:bg-primary/10"
+                          title="Editar maquininha"
+                          :aria-label="`Editar maquininha ${machine.name}`"
+                          @click="openEditCardMachineModal(machine)"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          type="button"
+                          :class="[
+                            'rounded px-2 py-1 text-xs font-medium transition',
+                            machine.is_active
+                              ? 'border border-amber-300 text-amber-700 hover:bg-amber-50'
+                              : 'border border-green-300 text-green-700 hover:bg-green-50',
+                          ]"
+                          :title="machine.is_active ? 'Desativar maquininha' : 'Ativar maquininha'"
+                          @click="toggleCardMachineActive(machine)"
+                        >
+                          {{ machine.is_active ? "Desativar" : "Ativar" }}
+                        </button>
+                        <button
+                          v-if="authStore.user?.role === 'admin'"
+                          type="button"
+                          class="min-h-11 min-w-11 flex items-center justify-center rounded p-2 text-danger transition hover:bg-red-50"
+                          title="Excluir maquininha permanentemente"
+                          :aria-label="`Excluir maquininha ${machine.name}`"
+                          @click="deleteCardMachine(machine)"
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr v-if="cardMachines.length === 0">
+                    <td colspan="6" class="px-4 py-6 text-center text-sm text-gray-500">
+                      Nenhuma maquininha cadastrada até o momento.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- CARDS MOBILE — apenas < md -->
+            <ul class="md:hidden space-y-2">
+              <li
+                v-for="machine in cardMachines"
+                :key="machine.id"
+                class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+              >
+                <!-- Linha 1: Nome + badge de status -->
+                <div class="flex items-start justify-between gap-2 mb-3">
+                  <div class="flex-1 min-w-0">
+                    <p class="text-base font-semibold text-gray-900 truncate">{{ machine.name }}</p>
+                    <p class="text-xs text-gray-400 mt-0.5">
+                      {{ machine.absorb_fee ? 'Absorve a taxa' : 'Repassa ao cliente' }}
+                    </p>
+                  </div>
+                  <span
+                    :class="[
+                      'shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold',
+                      machine.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-700',
+                    ]"
+                  >
+                    {{ machine.is_active ? 'Ativa' : 'Inativa' }}
+                  </span>
+                </div>
+
+                <!-- Linha 2: Taxas -->
+                <div class="grid grid-cols-2 gap-2 text-center mb-3">
+                  <div class="rounded-lg bg-surface px-2 py-1.5">
+                    <p class="text-xs text-gray-400">Taxa débito</p>
+                    <p class="text-sm font-bold text-gray-800">
+                      {{ machine.rates[0]?.debit_rate ?? 0 }}%
+                    </p>
+                  </div>
+                  <div class="rounded-lg bg-surface px-2 py-1.5">
+                    <p class="text-xs text-gray-400">Taxa crédito (base)</p>
+                    <p class="text-sm font-bold text-primary">
+                      {{ machine.rates[0]?.credit_base_rate ?? 0 }}%
+                    </p>
+                  </div>
+                </div>
+
+                <!-- Linha 3: Botões de ação -->
+                <div class="flex gap-2">
+                  <button
+                    type="button"
+                    class="min-h-11 flex-1 inline-flex items-center justify-center rounded-lg border border-gray-200 text-sm font-medium text-primary transition hover:bg-primary/5"
+                    :aria-label="`Editar maquininha ${machine.name}`"
+                    @click="openEditCardMachineModal(machine)"
+                  >
+                    ✏️ Editar
+                  </button>
+
+                  <button
+                    type="button"
+                    :class="[
+                      'min-h-11 flex-1 inline-flex items-center justify-center rounded-lg text-sm font-medium transition',
+                      machine.is_active
+                        ? 'border border-amber-200 text-amber-700 hover:bg-amber-50'
+                        : 'border border-green-200 text-green-700 hover:bg-green-50',
+                    ]"
+                    @click="toggleCardMachineActive(machine)"
+                  >
+                    {{ machine.is_active ? 'Desativar' : 'Ativar' }}
+                  </button>
+
+                  <button
+                    v-if="authStore.user?.role === 'admin'"
+                    type="button"
+                    class="min-h-11 min-w-11 flex items-center justify-center rounded-lg border border-red-100 text-danger transition hover:bg-red-50"
+                    :aria-label="`Excluir maquininha ${machine.name}`"
+                    @click="deleteCardMachine(machine)"
+                  >
+                    🗑️
+                  </button>
+                </div>
+              </li>
+
+              <li
+                v-if="cardMachines.length === 0"
+                class="rounded-xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-400"
+              >
+                Nenhuma maquininha cadastrada até o momento.
+              </li>
+            </ul>
           </div>
         </section>
 
@@ -1884,7 +2173,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                     type="text"
                     inputmode="numeric"
                     placeholder="Ex: 30"
-                    class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                     @input="handleFiadoMaxDaysInput"
                   />
                 </div>
@@ -1909,7 +2198,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                     v-model="fiadoForm.fiado_blocked_message"
                     rows="3"
                     maxlength="255"
-                    class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                     placeholder="Ex: Cliente com fiado bloqueado até regularização do débito."
                   ></textarea>
                 </div>
@@ -1918,7 +2207,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
               <div class="flex justify-end">
                 <button
                   type="submit"
-                  class="rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark disabled:opacity-50"
+                  class="w-full sm:w-auto min-h-11 inline-flex items-center justify-center rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark disabled:opacity-50"
                   :disabled="generalSettingsSaving"
                 >
                   {{ generalSettingsSaving ? "Salvando..." : "Salvar Configurações de Fiado" }}
@@ -1929,7 +2218,147 @@ function changePaymentTab(tab: PaymentTabKey): void {
         </section>
 
         <section
-          v-if="activeMainTab === 'settings'"
+          v-if="
+            activeMainTab === 'payment-methods' &&
+            activePaymentTab === 'whatsapp'
+          "
+          class="mt-6"
+        >
+          <div class="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+            <h2 class="text-2xl font-bold text-gray-900">Mensagens WhatsApp</h2>
+            <p class="mt-1 text-sm text-gray-600">Personalize os modelos usados nas cobranças automáticas de fiado.</p>
+
+            <p v-if="whatsappSubmitError" class="mt-4 rounded bg-red-100 p-3 text-sm text-danger" role="alert">
+              {{ whatsappSubmitError }}
+            </p>
+
+            <form class="mt-6 space-y-6" @submit.prevent="saveWhatsappSettings">
+              <div class="grid gap-4">
+                <div>
+                  <div class="mb-1 flex items-center justify-between gap-3">
+                    <label for="whatsapp_message_fiado_vencido" class="block text-sm font-medium text-gray-700">
+                      Mensagem para fiado vencido
+                    </label>
+                    <span class="text-xs font-medium text-gray-500">
+                      {{ getWhatsappMessageLength('whatsapp_message_fiado_vencido') }}/2000 caracteres
+                    </span>
+                  </div>
+                  <p class="mb-2 text-xs text-gray-500">
+                    Clique nos botões acima para incluir informações que o sistema preenche sozinho.
+                  </p>
+                  <div class="mb-3 flex flex-wrap items-center gap-2">
+                    <button
+                      v-for="button in whatsappTokenButtons"
+                      :key="`vencido-${button.token}`"
+                      type="button"
+                      class="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-medium text-red-700 transition hover:bg-red-100"
+                      @click="insertWhatsappToken('whatsapp_message_fiado_vencido', button.token)"
+                    >
+                      {{ button.label }}
+                    </button>
+                    <button
+                      type="button"
+                      class="rounded-full border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 transition hover:bg-gray-50"
+                      @click="restoreWhatsappDefault('whatsapp_message_fiado_vencido')"
+                    >
+                      Restaurar modelo padrão
+                    </button>
+                  </div>
+                  <textarea
+                    id="whatsapp_message_fiado_vencido"
+                    ref="whatsappVencidoTextarea"
+                    v-model="whatsappForm.whatsapp_message_fiado_vencido"
+                    rows="5"
+                    maxlength="2000"
+                    class="w-full rounded border border-red-300 px-3 py-2 text-base md:text-sm focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
+                    placeholder="Olá [NOME], notamos que o seu fiado de [TOTAL] venceu em [VENCIMENTO]. Como podemos te ajudar a regularizar?"
+                    @blur="ensureWhatsappMessageDefault('whatsapp_message_fiado_vencido')"
+                  ></textarea>
+                </div>
+
+                <div>
+                  <div class="mb-1 flex items-center justify-between gap-3">
+                    <label for="whatsapp_message_fiado_a_vencer" class="block text-sm font-medium text-gray-700">
+                      Mensagem para fiado a vencer
+                    </label>
+                    <span class="text-xs font-medium text-gray-500">
+                      {{ getWhatsappMessageLength('whatsapp_message_fiado_a_vencer') }}/2000 caracteres
+                    </span>
+                  </div>
+                  <p class="mb-2 text-xs text-gray-500">
+                    Clique nos botões acima para incluir informações que o sistema preenche sozinho.
+                  </p>
+                  <div class="mb-3 flex flex-wrap items-center gap-2">
+                    <button
+                      v-for="button in whatsappTokenButtons"
+                      :key="`a-vencer-${button.token}`"
+                      type="button"
+                      class="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 transition hover:bg-amber-100"
+                      @click="insertWhatsappToken('whatsapp_message_fiado_a_vencer', button.token)"
+                    >
+                      {{ button.label }}
+                    </button>
+                    <button
+                      type="button"
+                      class="rounded-full border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 transition hover:bg-gray-50"
+                      @click="restoreWhatsappDefault('whatsapp_message_fiado_a_vencer')"
+                    >
+                      Restaurar modelo padrão
+                    </button>
+                  </div>
+                  <textarea
+                    id="whatsapp_message_fiado_a_vencer"
+                    ref="whatsappAVencerTextarea"
+                    v-model="whatsappForm.whatsapp_message_fiado_a_vencer"
+                    rows="5"
+                    maxlength="2000"
+                    class="w-full rounded border border-amber-300 px-3 py-2 text-base md:text-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                    placeholder="Olá [NOME], passando para lembrar que o seu fiado de [TOTAL] vence em [VENCIMENTO]. Se precisar, estamos à disposição."
+                    @blur="ensureWhatsappMessageDefault('whatsapp_message_fiado_a_vencer')"
+                  ></textarea>
+                </div>
+
+                <div class="rounded-2xl border border-green-200 bg-[#e7f7eb] p-4">
+                  <div class="mb-3 flex items-center gap-2 text-sm font-medium text-green-900">
+                    <span class="inline-flex h-8 w-8 items-center justify-center rounded-full bg-green-600 text-white">W</span>
+                    Simulação de preview
+                  </div>
+
+                  <div class="space-y-4 rounded-2xl bg-[#d8f3dc] p-4">
+                    <div class="flex justify-start">
+                      <div class="max-w-[92%] rounded-2xl rounded-bl-md bg-white px-4 py-3 text-sm text-gray-800 shadow-sm">
+                        <p class="mb-1 text-xs font-semibold uppercase tracking-wide text-red-600">Fiado vencido</p>
+                        <p class="whitespace-pre-line">{{ whatsappPreviewVencido }}</p>
+                        <p class="mt-2 text-right text-[11px] text-gray-400">09:41</p>
+                      </div>
+                    </div>
+
+                    <div class="flex justify-end">
+                      <div class="max-w-[92%] rounded-2xl rounded-br-md bg-[#dcf8c6] px-4 py-3 text-sm text-gray-800 shadow-sm">
+                        <p class="mb-1 text-xs font-semibold uppercase tracking-wide text-amber-700">Fiado a vencer</p>
+                        <p class="whitespace-pre-line">{{ whatsappPreviewAVencer }}</p>
+                        <p class="mt-2 text-right text-[11px] text-gray-400">09:42</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex justify-end">
+                <button
+                  type="submit"
+                  class="w-full sm:w-auto min-h-11 inline-flex items-center justify-center rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark disabled:opacity-50"
+                  :disabled="generalSettingsSaving"
+                >
+                  {{ generalSettingsSaving ? "Salvando..." : "Salvar Mensagens" }}
+                </button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <section
+          v-if="activeMainTab === 'alerts'"
           class="mt-6"
         >
           <div class="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
@@ -1952,7 +2381,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                     type="text"
                     inputmode="numeric"
                     placeholder="Ex: 5"
-                    class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                     @input="handleAlertStockMinUnitsInput"
                   />
                   <p class="mt-1 text-xs text-gray-500">
@@ -1970,7 +2399,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                     type="text"
                     inputmode="numeric"
                     placeholder="0,000"
-                    class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                     @input="handleAlertStockMinBulkKgInput"
                   />
                   <p class="mt-1 text-xs text-gray-500">
@@ -1988,7 +2417,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                     type="text"
                     inputmode="numeric"
                     placeholder="R$ 0,00"
-                    class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                     @input="handleAlertCashRegisterInput"
                   />
                   <p class="mt-1 text-xs text-gray-500">
@@ -2006,7 +2435,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                     type="text"
                     inputmode="numeric"
                     placeholder="R$ 500,00"
-                    class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                     @input="handleAlertRefundLimitInput"
                   />
                   <p class="mt-1 text-xs text-gray-500">
@@ -2021,25 +2450,25 @@ function changePaymentTab(tab: PaymentTabKey): void {
                   Defina limites acumulados por tipo. A unidade é definida automaticamente com base no cadastro atual.
                 </p>
 
-                <div class="mt-4 overflow-x-auto">
+                <div class="mt-4 hidden md:block overflow-x-auto rounded-lg border border-gray-200">
                   <table class="w-full min-w-[640px]">
                     <thead>
                       <tr class="border-b border-gray-200 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
                         <th class="cursor-pointer select-none px-2 py-2" @click="toggleAlertTypesSort('name')">
                           Tipo
-                          <span :class="alertTypesSortColumn === 'name' ? 'text-primary' : 'text-gray-400'">
+                          <span :class="alertTypesSortColumn === 'name' ? 'text-primary' : 'text-gray-500'">
                             {{ alertTypesSortColumn === 'name' ? (alertTypesSortOrder === 'asc' ? '↑' : '↓') : '↕' }}
                           </span>
                         </th>
                         <th class="cursor-pointer select-none px-2 py-2" @click="toggleAlertTypesSort('limit_qty')">
                           Limite mín. qtd.
-                          <span :class="alertTypesSortColumn === 'limit_qty' ? 'text-primary' : 'text-gray-400'">
+                          <span :class="alertTypesSortColumn === 'limit_qty' ? 'text-primary' : 'text-gray-500'">
                             {{ alertTypesSortColumn === 'limit_qty' ? (alertTypesSortOrder === 'asc' ? '↑' : '↓') : '↕' }}
                           </span>
                         </th>
                         <th class="cursor-pointer select-none px-2 py-2" @click="toggleAlertTypesSort('limit_pct')">
                           Limite mín. %
-                          <span :class="alertTypesSortColumn === 'limit_pct' ? 'text-primary' : 'text-gray-400'">
+                          <span :class="alertTypesSortColumn === 'limit_pct' ? 'text-primary' : 'text-gray-500'">
                             {{ alertTypesSortColumn === 'limit_pct' ? (alertTypesSortOrder === 'asc' ? '↑' : '↓') : '↕' }}
                           </span>
                         </th>
@@ -2060,7 +2489,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                             type="text"
                             inputmode="numeric"
                             :placeholder="getTypeUnit(productType.id) === 'kg' ? '0,000' : '0'"
-                            class="w-28 rounded border border-gray-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                            class="w-28 rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                             @input="(event) => handleTypeLimitInput(productType.id, getTypeUnit(productType.id), event)"
                           />
                         </td>
@@ -2072,7 +2501,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                               type="text"
                               inputmode="numeric"
                               placeholder="0"
-                              class="w-16 rounded border border-gray-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                              class="w-16 rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                               @input="(event) => handleTypePctInput(productType.id, event)"
                             />
                             <span class="text-sm text-gray-500">%</span>
@@ -2089,19 +2518,76 @@ function changePaymentTab(tab: PaymentTabKey): void {
                   </table>
                 </div>
 
-                <div v-if="totalAlertTypePages > 1" class="mt-3 flex items-center justify-end gap-3">
+                <ul class="mt-4 space-y-2 md:hidden">
+                  <li
+                    v-for="productType in paginatedAlertProductTypes"
+                    :key="productType.id"
+                    class="rounded-xl border border-gray-200 bg-white p-4"
+                  >
+                    <div class="mb-3 flex items-center justify-between gap-2">
+                      <p class="text-sm font-semibold text-gray-900">{{ productType.name }}</p>
+                      <span class="rounded-full bg-surface px-2 py-0.5 text-xs text-gray-400">
+                        {{ getTypeUnit(productType.id) }}
+                      </span>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                      <div>
+                        <label class="mb-1 block text-xs font-medium text-gray-500">
+                          Limite mín. qtd.
+                        </label>
+                        <input
+                          :id="`stock_alert_type_mobile_${productType.id}`"
+                          :value="alertTypeLimitForm[productType.id] || ''"
+                          type="text"
+                          inputmode="numeric"
+                          :placeholder="getTypeUnit(productType.id) === 'kg' ? '0,000' : '0'"
+                          class="w-full rounded-lg border border-gray-200 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                          @input="(event) => handleTypeLimitInput(productType.id, getTypeUnit(productType.id), event)"
+                        />
+                      </div>
+                      <div>
+                        <label class="mb-1 block text-xs font-medium text-gray-500">
+                          Limite mín. %
+                        </label>
+                        <div class="relative">
+                          <input
+                            :id="`stock_alert_type_pct_mobile_${productType.id}`"
+                            :value="alertTypePctLimitForm[productType.id] || ''"
+                            type="text"
+                            inputmode="numeric"
+                            placeholder="0"
+                            maxlength="3"
+                            class="w-full rounded-lg border border-gray-200 px-3 py-2 pr-7 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                            @input="(event) => handleTypePctInput(productType.id, event)"
+                          />
+                          <span class="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
+                        </div>
+                      </div>
+                    </div>
+                  </li>
+
+                  <li
+                    v-if="paginatedAlertProductTypes.length === 0"
+                    class="rounded-xl border border-gray-200 bg-white p-6 text-center text-sm text-gray-500"
+                  >
+                    Nenhum tipo de produto cadastrado.
+                  </li>
+                </ul>
+
+                <div v-if="totalAlertTypePages > 1" class="mt-3 flex items-center justify-between gap-2">
                   <button
                     type="button"
-                    class="rounded border border-gray-300 px-3 py-1 text-sm text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    class="min-h-11 rounded-lg border border-gray-300 px-4 text-sm text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
                     :disabled="alertTypesCurrentPage === 1"
                     @click="alertTypesCurrentPage--"
                   >
                     ← Anterior
                   </button>
-                  <span class="text-xs text-gray-500">Página {{ alertTypesCurrentPage }} de {{ totalAlertTypePages }}</span>
+                  <span class="text-sm text-gray-500">{{ alertTypesCurrentPage }} / {{ totalAlertTypePages }}</span>
                   <button
                     type="button"
-                    class="rounded border border-gray-300 px-3 py-1 text-sm text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    class="min-h-11 rounded-lg border border-gray-300 px-4 text-sm text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
                     :disabled="alertTypesCurrentPage >= totalAlertTypePages"
                     @click="alertTypesCurrentPage++"
                   >
@@ -2136,7 +2622,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
               <div class="flex justify-end">
                 <button
                   type="submit"
-                  class="rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark disabled:opacity-50"
+                  class="w-full sm:w-auto min-h-11 inline-flex items-center justify-center rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark disabled:opacity-50"
                   :disabled="alertsSaving"
                 >
                   {{ alertsSaving ? "Salvando..." : "Salvar Configurações de Alertas" }}
@@ -2148,38 +2634,41 @@ function changePaymentTab(tab: PaymentTabKey): void {
 
         <div
           v-if="showCardMachineModal"
-          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+          class="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 backdrop-blur-sm sm:items-center sm:p-4"
           role="dialog"
           aria-modal="true"
-          aria-labelledby="settings-card-machine-modal-title"
+          aria-labelledby="card-machine-modal-title"
           @click.self="closeCardMachineModal"
         >
-          <div class="w-full max-w-3xl rounded-xl bg-white p-6 shadow-xl">
-            <div class="mb-4 flex items-center justify-between">
-              <h2 id="settings-card-machine-modal-title" class="text-xl font-bold text-gray-900">
-                {{ isCardMachineEditMode ? "Editar Máquina" : "Nova Máquina" }}
-              </h2>
-              <button
-                type="button"
-                class="rounded-lg p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600"
-                aria-label="Fechar modal"
-                :disabled="cardMachineSubmitLoading"
-                @click="closeCardMachineModal"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  class="h-6 w-6"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
+          <div class="relative max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:max-w-3xl sm:rounded-2xl">
+            <div class="mx-auto mt-3 h-1 w-12 rounded-full bg-gray-200 sm:hidden" aria-hidden="true"></div>
 
-            <form class="space-y-6" @submit.prevent="submitCardMachineForm">
+            <div class="p-4 sm:p-6">
+              <div class="mb-4 flex items-center justify-between">
+                <h2 id="card-machine-modal-title" class="text-lg font-bold text-gray-900">
+                  {{ isCardMachineEditMode ? "Editar Maquininha" : "Nova Máquina" }}
+                </h2>
+                <button
+                  type="button"
+                  class="min-h-11 min-w-11 flex items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-600"
+                  aria-label="Fechar modal"
+                  :disabled="cardMachineSubmitLoading"
+                  @click="closeCardMachineModal"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-6 w-6"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <form id="card-machine-form" class="space-y-6" @submit.prevent="submitCardMachineForm">
               <section class="space-y-4 rounded-lg border border-gray-200 p-4">
                 <h3 class="text-sm font-semibold text-gray-800">Informações da Máquina</h3>
                 <div>
@@ -2190,7 +2679,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                     autofocus
                     placeholder="Ex: Moderninha Branca, Stone Balcão"
                     maxlength="100"
-                    class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   />
                   <p v-if="cardMachineFormErrors.name" class="mt-1 text-xs text-danger">
                     {{ cardMachineFormErrors.name[0] }}
@@ -2221,7 +2710,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                       type="text"
                       inputmode="decimal"
                       placeholder="Ex: 1.99"
-                      class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                       @input="(event) => handleRateInput(event, 'debit_rate')"
                     />
                   </div>
@@ -2233,7 +2722,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                       type="text"
                       inputmode="decimal"
                       placeholder="Ex: 4.99"
-                      class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                       @input="(event) => handleRateInput(event, 'credit_base_rate')"
                     />
                     <p class="mt-0.5 text-xs text-gray-500">Base para o cálculo progressivo de parcelas.</p>
@@ -2246,7 +2735,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                       type="text"
                       inputmode="decimal"
                       placeholder="Ex: 1.50"
-                      class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                       @input="(event) => handleRateInput(event, 'credit_incremental_rate')"
                     />
                     <p class="mt-0.5 text-xs text-gray-500">Percentual adicional por parcela além da primeira.</p>
@@ -2256,7 +2745,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                     <label class="mb-1 block text-sm font-medium text-gray-700">Máximo de Parcelas Aceitas</label>
                     <select
                       v-model="cardMachineFormData.rates.max_installments"
-                      class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                     >
                       <option v-for="value in 12" :key="value" :value="String(value)">{{ value }}</option>
                     </select>
@@ -2265,11 +2754,11 @@ function changePaymentTab(tab: PaymentTabKey): void {
 
                 <div v-if="ratePreviewItems.length > 0" class="rounded-md bg-gray-50 p-3">
                   <p class="mb-2 text-xs font-semibold text-gray-700">Prévia das taxas:</p>
-                  <ul class="space-y-1">
+                  <ul class="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <li
                       v-for="item in ratePreviewItems"
                       :key="item.installments"
-                      class="flex items-center justify-between text-xs text-gray-700"
+                      class="flex items-center justify-between rounded border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700"
                     >
                       <span>{{ item.installments === 1 ? "1x (à vista)" : `${item.installments}x` }}</span>
                       <span class="font-medium text-primary">{{ item.rateLabel }}%</span>
@@ -2322,10 +2811,10 @@ function changePaymentTab(tab: PaymentTabKey): void {
                 {{ cardMachineFormErrors.submit }}
               </div>
 
-              <div class="flex justify-end gap-3 border-t border-gray-200 pt-4">
+              <div class="mt-6 flex flex-col-reverse gap-2 border-t border-gray-200 pt-4 sm:flex-row sm:justify-end">
                 <button
                   type="button"
-                  class="rounded border border-gray-300 px-4 py-2 font-medium text-gray-700 transition hover:bg-gray-50"
+                  class="w-full sm:w-auto min-h-11 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
                   :disabled="cardMachineSubmitLoading"
                   @click="closeCardMachineModal"
                 >
@@ -2333,60 +2822,64 @@ function changePaymentTab(tab: PaymentTabKey): void {
                 </button>
                 <button
                   type="submit"
-                  class="rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
+                  class="w-full sm:w-auto min-h-11 rounded-lg bg-primary px-6 py-2 text-sm font-medium text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
                   :disabled="cardMachineSubmitLoading"
                 >
-                  {{ cardMachineSubmitLoading ? "Salvando..." : "Salvar" }}
+                  {{ cardMachineSubmitLoading ? "Salvando..." : isCardMachineEditMode ? "Salvar alterações" : "Criar Máquina" }}
                 </button>
               </div>
             </form>
           </div>
+        </div>
         </div>
 
         <!-- Modal de confirmação de exclusão permanente de maquininha gerenciado por ConfirmDialog -->
 
         <div
           v-if="showPasswordModal"
-          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+          class="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 backdrop-blur-sm sm:items-center sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="settings-password-modal-title"
           @click.self="closePasswordModal"
         >
-          <div class="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
-            <div class="mb-4 flex items-center justify-between">
-              <h2 id="settings-password-modal-title" class="text-xl font-bold text-gray-900">
-                Confirme sua senha para continuar
-              </h2>
-              <button
-                type="button"
-                class="rounded-lg p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600"
-                aria-label="Fechar modal"
-                :disabled="loadingSubmit"
-                @click="closePasswordModal"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  class="h-6 w-6"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  stroke-width="2"
+          <div class="relative max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:max-w-md sm:rounded-2xl">
+            <div class="mx-auto mt-3 h-1 w-12 rounded-full bg-gray-200 sm:hidden" aria-hidden="true"></div>
+
+            <div class="p-4 sm:p-6">
+              <div class="mb-4 flex items-center justify-between">
+                <h2 id="settings-password-modal-title" class="text-lg font-bold text-gray-900">
+                  Confirme sua senha para continuar
+                </h2>
+                <button
+                  type="button"
+                  class="min-h-11 min-w-11 flex items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-600"
+                  aria-label="Fechar modal"
+                  :disabled="loadingSubmit"
+                  @click="closePasswordModal"
                 >
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-6 w-6"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
 
-            <p class="text-sm text-gray-600">
-              Por segurança, alterações na chave Pix exigem a confirmação da sua senha.
-            </p>
+              <p class="text-sm text-gray-600">
+                Por segurança, alterações na chave Pix exigem a confirmação da sua senha.
+              </p>
 
-            <div v-if="modalError" class="mt-4 rounded bg-red-100 p-3 text-sm text-danger" role="alert">
-              {{ modalError }}
-            </div>
+              <div v-if="modalError" class="mt-4 rounded bg-red-100 p-3 text-sm text-danger" role="alert">
+                {{ modalError }}
+              </div>
 
-            <form class="mt-4 space-y-4" @submit.prevent="confirmSavePixSettings">
+              <form class="mt-4 space-y-4" @submit.prevent="confirmSavePixSettings">
               <div>
                 <label for="current_password" class="mb-1 block text-sm font-medium text-gray-700">
                   Senha do administrador *
@@ -2397,17 +2890,17 @@ function changePaymentTab(tab: PaymentTabKey): void {
                   type="password"
                   autofocus
                   autocomplete="current-password"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                 />
                 <div v-if="passwordErrors.length > 0" class="mt-1 text-xs text-danger" role="alert">
                   {{ passwordErrors[0] }}
                 </div>
               </div>
 
-              <div class="flex justify-end gap-3 pt-2">
+              <div class="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
                 <button
                   type="button"
-                  class="rounded border border-gray-300 px-4 py-2 font-medium text-gray-700 transition hover:bg-gray-50"
+                  class="w-full sm:w-auto min-h-11 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
                   :disabled="loadingSubmit"
                   @click="closePasswordModal"
                 >
@@ -2416,7 +2909,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                 <button
                   type="submit"
                   :disabled="loadingSubmit"
-                  class="flex items-center gap-2 rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
+                  class="w-full sm:w-auto min-h-11 flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <svg
                     v-if="loadingSubmit"
@@ -2444,6 +2937,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
               </div>
             </form>
           </div>
+        </div>
         </div>
 
         <div

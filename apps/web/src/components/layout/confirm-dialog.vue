@@ -35,7 +35,7 @@ function onBackdropClick(event: MouseEvent): void {
     aria-labelledby="confirm-dialog-title"
     @click="onBackdropClick"
   >
-    <div class="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+    <div class="mx-auto max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
       <h2 id="confirm-dialog-title" class="text-lg font-bold text-gray-900">
         {{ title }}
       </h2>

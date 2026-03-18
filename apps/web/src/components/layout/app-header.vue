@@ -123,11 +123,11 @@ onUnmounted(() => {
     <div class="flex items-center gap-2">
       <button
         type="button"
-        class="rounded border border-gray-300 px-2 py-1 text-sm text-gray-700 transition hover:bg-gray-50 md:hidden"
+        class="md:hidden min-h-11 min-w-11 flex items-center justify-center rounded-lg border border-gray-300 text-gray-700 transition hover:bg-gray-50 active:bg-gray-200"
         aria-label="Abrir menu de navegação"
         @click="openMobileMenu"
       >
-        ☰
+        <span class="text-xl leading-none select-none" aria-hidden="true">☰</span>
       </button>
       <span class="text-lg font-semibold text-primary">PDV FiadoDigital</span>
     </div>
@@ -139,7 +139,7 @@ onUnmounted(() => {
         aria-live="polite"
         class="inline-flex items-center gap-1 rounded bg-amber-50 px-2 py-1 text-xs font-medium text-warning md:text-sm"
       >
-        <span>⚠️</span>
+        <span class="text-xl leading-none select-none" aria-hidden="true">⚠️</span>
         <span>Servidor indisponível</span>
       </div>
 
@@ -147,11 +147,11 @@ onUnmounted(() => {
       <div class="relative" data-notification-panel>
         <button
           type="button"
-          :aria-label="`${unreadCount} notificação${unreadCount !== 1 ? 'ões' : ''} não lida${unreadCount !== 1 ? 's' : ''}`"
+          :aria-label="`Ver notificações — ${unreadCount} notificação${unreadCount !== 1 ? 'ões' : ''} não lida${unreadCount !== 1 ? 's' : ''}`"
           class="relative flex min-h-11 min-w-11 items-center justify-center rounded-full transition-colors hover:bg-surface"
           @click.stop="toggleNotificationPanel"
         >
-          <span class="text-xl">🔔</span>
+          <span class="text-xl leading-none select-none" aria-hidden="true">🔔</span>
           <span
             v-if="unreadCount > 0"
             aria-hidden="true"
@@ -161,18 +161,26 @@ onUnmounted(() => {
           </span>
         </button>
 
+        <button
+          v-if="showPanel"
+          type="button"
+          aria-label="Fechar painel de notificações"
+          class="fixed inset-0 z-40 bg-black/20 sm:hidden"
+          @click="closePanel"
+        />
+
         <!-- Dropdown de prévia -->
         <div
           v-if="showPanel"
           role="region"
           aria-label="Notificações recentes"
-          class="absolute right-0 top-full z-50 mt-2 w-80 rounded-lg border bg-white shadow-lg"
+          class="fixed inset-x-3 top-24 z-50 max-h-[calc(100dvh-7rem)] overflow-hidden rounded-lg border bg-white shadow-lg sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:max-h-none sm:w-80"
         >
-          <div class="flex items-center justify-between border-b px-4 py-2">
+          <div class="flex flex-col gap-2 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:py-2">
             <span class="text-sm font-semibold">Notificações</span>
             <button
               type="button"
-              class="text-xs text-primary hover:underline focus:outline-none"
+              class="self-start text-xs text-primary hover:underline focus:outline-none sm:self-auto"
               @click="handleMarkAllRead"
             >
               Marcar tudo como lido
@@ -181,7 +189,7 @@ onUnmounted(() => {
 
           <ul
             v-if="recentNotifications.length > 0"
-            class="max-h-72 divide-y overflow-y-auto"
+            class="max-h-[calc(100dvh-12rem)] divide-y overflow-y-auto sm:max-h-72"
             role="list"
           >
             <li
@@ -195,8 +203,8 @@ onUnmounted(() => {
               <div class="flex items-start gap-2">
                 <span :class="['text-sm', severityIconClass(notification.severity)]">●</span>
                 <div class="min-w-0 flex-1">
-                  <p class="truncate text-sm">{{ notification.title }}</p>
-                  <p class="line-clamp-2 text-xs text-gray-500">{{ notification.message }}</p>
+                  <p class="text-sm wrap-break-word sm:truncate">{{ notification.title }}</p>
+                  <p class="line-clamp-3 wrap-break-word text-xs text-gray-500 sm:line-clamp-2">{{ notification.message }}</p>
                   <p class="mt-1 text-xs text-gray-400">{{ formatRelativeTime(notification.created_at) }}</p>
                 </div>
               </div>

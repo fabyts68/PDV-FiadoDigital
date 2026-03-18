@@ -93,6 +93,7 @@ const showProductModal = ref(false);
 const isProductEditMode = ref(false);
 const editingProduct = ref<Product | null>(null);
 const loadingProductSubmit = ref(false);
+const productModalScrollableRef = ref<HTMLDivElement | null>(null);
 
 const productFormData = ref<ProductFormData>({
   name: "",
@@ -604,6 +605,14 @@ function closeProductModal(): void {
   closeInlineBrandCreate();
 }
 
+function scrollProductModalToTop(): void {
+  if (!productModalScrollableRef.value) {
+    return;
+  }
+
+  productModalScrollableRef.value.scrollTo({ top: 0, behavior: "smooth" });
+}
+
 function handlePriceInput(event: Event): void {
   const target = event.target as HTMLInputElement;
   productFormData.value.price_input = formatCurrencyInput(target.value);
@@ -798,6 +807,8 @@ function validateProductForm(): boolean {
 async function submitProductForm(): Promise<void> {
   if (!validateProductForm()) {
     productFormErrors.value.submit = "Revise os campos destacados para continuar.";
+    toast("Revise os campos destacados para continuar.", "error");
+    scrollProductModalToTop();
     return;
   }
 
@@ -870,6 +881,9 @@ async function submitProductForm(): Promise<void> {
       } else {
         productFormErrors.value.submit = data.message || "Erro ao salvar produto.";
       }
+
+      toast(productFormErrors.value.submit || "Erro ao salvar produto.", "error");
+      scrollProductModalToTop();
       return;
     }
 
@@ -884,6 +898,8 @@ async function submitProductForm(): Promise<void> {
   } catch (error) {
     console.error("Erro ao salvar produto:", error);
     productFormErrors.value.submit = "Erro de conexão com o servidor";
+    toast("Erro de conexão com o servidor", "error");
+    scrollProductModalToTop();
   } finally {
     loadingProductSubmit.value = false;
   }
@@ -1434,63 +1450,61 @@ async function submitSinglePrice(): Promise<void> {
           <h1 class="text-3xl font-bold text-gray-900">Gerenciamento de Produtos</h1>
         </div>
 
-        <div class="mt-6 flex items-center gap-2 border-b border-gray-200">
-          <button
-            type="button"
-            :class="[
-              'rounded-t-lg px-4 py-2 text-sm font-semibold transition',
-              activeTab === 'products'
-                ? 'bg-primary text-white'
-                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
-            ]"
-            @click="activeTab = 'products'"
-          >
-            Produtos
-          </button>
-          <button
-            v-if="canManageProductTypes"
-            type="button"
-            :class="[
-              'rounded-t-lg px-4 py-2 text-sm font-semibold transition',
-              activeTab === 'product-types'
-                ? 'bg-primary text-white'
-                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
-            ]"
-            @click="activeTab = 'product-types'"
-          >
-            Tipos de Produto
-          </button>
-          <button
-            v-if="isAdmin"
-            type="button"
-            :class="[
-              'rounded-t-lg px-4 py-2 text-sm font-semibold transition',
-              activeTab === 'prices'
-                ? 'bg-primary text-white'
-                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
-            ]"
-            @click="activeTab = 'prices'"
-          >
-            Preços
-          </button>
+        <div class="mt-6 -mx-3 overflow-x-auto px-3 md:mx-0 md:px-0">
+          <div class="mb-6 flex min-w-max gap-1 border-b border-gray-200 md:min-w-0">
+            <button
+              type="button"
+              class="-mb-px min-h-11 whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium transition-colors"
+              :class="activeTab === 'products'
+                ? 'border-primary text-primary'
+                : 'border-transparent text-gray-500 hover:text-gray-700'"
+              @click="activeTab = 'products'"
+            >
+              Produtos
+            </button>
+            <button
+              v-if="canManageProductTypes"
+              type="button"
+              class="-mb-px min-h-11 whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium transition-colors"
+              :class="activeTab === 'product-types'
+                ? 'border-primary text-primary'
+                : 'border-transparent text-gray-500 hover:text-gray-700'"
+              @click="activeTab = 'product-types'"
+            >
+              Tipos de Produto
+            </button>
+            <button
+              v-if="isAdmin || canManageProductTypes"
+              type="button"
+              class="-mb-px min-h-11 whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium transition-colors"
+              :class="activeTab === 'prices'
+                ? 'border-primary text-primary'
+                : 'border-transparent text-gray-500 hover:text-gray-700'"
+              @click="activeTab = 'prices'"
+            >
+              Preços
+            </button>
+          </div>
         </div>
 
         <section v-if="activeTab === 'products'" class="mt-6">
-          <div class="mb-4 flex flex-wrap items-center justify-end gap-3">
-            <button
-              type="button"
-              class="rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark"
-              @click="openCreateProductModal"
-            >
-              + Novo Produto
-            </button>
-            <button
-              type="button"
-              class="rounded border border-primary px-4 py-2 font-medium text-primary transition hover:bg-primary/10"
-              @click="openStockModal"
-            >
-              + Entrada de Estoque
-            </button>
+          <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div class="grid grid-cols-2 gap-2 sm:flex sm:gap-2">
+              <button
+                type="button"
+                class="min-h-11 rounded bg-primary px-4 text-sm font-medium text-white transition hover:bg-primary-dark"
+                @click="openCreateProductModal"
+              >
+                + Novo Produto
+              </button>
+              <button
+                type="button"
+                class="min-h-11 rounded border border-primary px-4 text-sm font-medium text-primary transition hover:bg-primary/10"
+                @click="openStockModal"
+              >
+                + Entrada de Estoque
+              </button>
+            </div>
           </div>
 
           <div v-if="loadingProducts" class="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
@@ -1505,7 +1519,7 @@ async function submitSinglePrice(): Promise<void> {
             <p>{{ productsError }}</p>
             <button
               type="button"
-              class="mt-3 rounded bg-primary px-3 py-1.5 text-white transition hover:bg-primary-dark"
+              class="mt-3 min-h-11 inline-flex items-center justify-center rounded bg-primary px-3 py-1.5 text-white transition hover:bg-primary-dark"
               @click="reloadProducts"
             >
               Tentar novamente
@@ -1519,77 +1533,145 @@ async function submitSinglePrice(): Promise<void> {
             Nenhum produto cadastrado ainda.
           </div>
 
-          <div v-else class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-            <table class="w-full min-w-[1180px]">
-              <caption class="sr-only">Lista de produtos cadastrados</caption>
-              <thead class="bg-gray-50">
-                <tr>
-                  <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Código de Barras</th>
-                  <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
-                    <button type="button" class="inline-flex items-center gap-1" @click="toggleProductSort('name')">
-                      Nome
-                      <span>{{ getSortIndicator(productSort, 'name') }}</span>
-                    </button>
-                  </th>
-                  <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
-                    <button type="button" class="inline-flex items-center gap-1" @click="toggleProductSort('brand')">
-                      Marca
-                      <span>{{ getSortIndicator(productSort, 'brand') }}</span>
-                    </button>
-                  </th>
-                  <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Gramagem</th>
-                  <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
-                    <button type="button" class="inline-flex items-center gap-1" @click="toggleProductSort('type')">
-                      Tipo
-                      <span>{{ getSortIndicator(productSort, 'type') }}</span>
-                    </button>
-                  </th>
-                  <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
-                    <button type="button" class="inline-flex items-center gap-1" @click="toggleProductSort('price')">
-                      Preço
-                      <span>{{ getSortIndicator(productSort, 'price') }}</span>
-                    </button>
-                  </th>
-                  <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
-                    <button type="button" class="inline-flex items-center gap-1" @click="toggleProductSort('stock')">
-                      Estoque
-                      <span>{{ getSortIndicator(productSort, 'stock') }}</span>
-                    </button>
-                  </th>
-                  <th scope="col" class="px-6 py-3 text-center text-sm font-semibold text-gray-700">Ações</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-200">
-                <tr v-for="product in sortedProducts" :key="product.id" class="hover:bg-gray-50">
-                  <td class="px-6 py-4 text-sm text-gray-700">{{ product.barcode ?? "-" }}</td>
-                  <td class="px-6 py-4 text-sm text-gray-900">{{ product.name }}</td>
-                  <td class="px-6 py-4 text-sm text-gray-600">{{ product.brand?.name ?? "—" }}</td>
-                  <td class="px-6 py-4 text-sm text-gray-600">{{ formatWeight(product) }}</td>
-                  <td class="px-6 py-4 text-sm text-gray-600">{{ product.product_type?.name ?? "-" }}</td>
-                  <td class="px-6 py-4 text-sm text-gray-600">{{ formatCents(product.price_cents) }}</td>
-                  <td class="px-6 py-4 text-sm">
-                    <span
-                      :class="[
-                        'font-semibold',
-                        product.stock_quantity < product.min_stock_alert ? 'text-danger' : 'text-gray-700',
-                      ]"
+          <div v-else>
+            <div class="hidden overflow-x-auto rounded-lg border border-gray-200 bg-white md:block">
+              <table class="w-full min-w-[1180px]">
+                <caption class="sr-only">Lista de produtos cadastrados</caption>
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Código de Barras</th>
+                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                      <button type="button" class="inline-flex items-center gap-1" @click="toggleProductSort('name')">
+                        Nome
+                        <span>{{ getSortIndicator(productSort, 'name') }}</span>
+                      </button>
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                      <button type="button" class="inline-flex items-center gap-1" @click="toggleProductSort('brand')">
+                        Marca
+                        <span>{{ getSortIndicator(productSort, 'brand') }}</span>
+                      </button>
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Gramagem</th>
+                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                      <button type="button" class="inline-flex items-center gap-1" @click="toggleProductSort('type')">
+                        Tipo
+                        <span>{{ getSortIndicator(productSort, 'type') }}</span>
+                      </button>
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                      <button type="button" class="inline-flex items-center gap-1" @click="toggleProductSort('price')">
+                        Preço
+                        <span>{{ getSortIndicator(productSort, 'price') }}</span>
+                      </button>
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                      <button type="button" class="inline-flex items-center gap-1" @click="toggleProductSort('stock')">
+                        Estoque
+                        <span>{{ getSortIndicator(productSort, 'stock') }}</span>
+                      </button>
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-center text-sm font-semibold text-gray-700">Ações</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                  <tr v-for="product in sortedProducts" :key="product.id" class="hover:bg-gray-50">
+                    <td class="px-6 py-4 text-sm text-gray-700">{{ product.barcode ?? "-" }}</td>
+                    <td class="px-6 py-4 text-sm text-gray-900">{{ product.name }}</td>
+                    <td class="px-6 py-4 text-sm text-gray-600">{{ product.brand?.name ?? "—" }}</td>
+                    <td class="px-6 py-4 text-sm text-gray-600">{{ formatWeight(product) }}</td>
+                    <td class="px-6 py-4 text-sm text-gray-600">{{ product.product_type?.name ?? "-" }}</td>
+                    <td class="px-6 py-4 text-sm text-gray-600">{{ formatCents(product.price_cents) }}</td>
+                    <td class="px-6 py-4 text-sm">
+                      <span
+                        :class="[
+                          'font-semibold',
+                          product.stock_quantity < product.min_stock_alert ? 'text-danger' : 'text-gray-700',
+                        ]"
+                      >
+                        {{ formatStock(product.stock_quantity, product.is_bulk) }}
+                      </span>
+                    </td>
+                    <td class="px-6 py-4 text-center">
+                      <button
+                        type="button"
+                        aria-label="Editar produto"
+                        class="rounded p-2 text-primary transition hover:bg-gray-100"
+                        @click="openEditProductModal(product)"
+                      >
+                        ⚙️
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <ul class="space-y-2 md:hidden">
+              <li
+                v-for="product in sortedProducts"
+                :key="product.id"
+                class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+              >
+                <div class="mb-2 flex items-start justify-between gap-2">
+                  <div class="min-w-0 flex-1">
+                    <p class="truncate text-base font-semibold text-gray-900">
+                      {{ product.name }}
+                    </p>
+                    <p class="mt-0.5 text-xs text-gray-400">
+                      {{ product.barcode ?? "Sem código" }}
+                      {{ product.brand?.name ? `· ${product.brand.name}` : "" }}
+                    </p>
+                  </div>
+                  <span
+                    v-if="product.stock_quantity < product.min_stock_alert"
+                    class="shrink-0 rounded-full bg-danger/10 px-2 py-0.5 text-xs font-semibold text-danger"
+                  >
+                    ⚠️ Baixo
+                  </span>
+                </div>
+
+                <div class="mb-3 grid grid-cols-3 gap-2 text-center">
+                  <div class="rounded-lg bg-surface px-2 py-1.5">
+                    <p class="text-xs text-gray-400">Preço</p>
+                    <p class="text-sm font-bold text-gray-800">
+                      {{ formatCents(product.price_cents) }}
+                    </p>
+                  </div>
+                  <div class="rounded-lg bg-surface px-2 py-1.5">
+                    <p class="text-xs text-gray-400">Estoque</p>
+                    <p
+                      class="text-sm font-bold"
+                      :class="product.stock_quantity < product.min_stock_alert ? 'text-danger' : 'text-gray-800'"
                     >
                       {{ formatStock(product.stock_quantity, product.is_bulk) }}
-                    </span>
-                  </td>
-                  <td class="px-6 py-4 text-center">
-                    <button
-                      type="button"
-                      aria-label="Editar produto"
-                      class="rounded p-2 text-primary transition hover:bg-gray-100"
-                      @click="openEditProductModal(product)"
-                    >
-                      ⚙️
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                    </p>
+                  </div>
+                  <div class="rounded-lg bg-surface px-2 py-1.5">
+                    <p class="text-xs text-gray-400">Tipo</p>
+                    <p class="truncate text-xs font-medium text-gray-700">
+                      {{ product.product_type?.name ?? "—" }}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  class="min-h-11 w-full rounded-lg border border-gray-200 text-sm font-medium text-primary transition hover:bg-primary/5 active:bg-primary/10"
+                  :aria-label="`Editar produto ${product.name}`"
+                  @click="openEditProductModal(product)"
+                >
+                  ⚙️ Editar produto
+                </button>
+              </li>
+
+              <li
+                v-if="!sortedProducts.length"
+                class="rounded-xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-400"
+              >
+                Nenhum produto encontrado.
+              </li>
+            </ul>
           </div>
         </section>
 
@@ -1616,7 +1698,7 @@ async function submitSinglePrice(): Promise<void> {
             <p>{{ productTypesError }}</p>
             <button
               type="button"
-              class="mt-3 rounded bg-primary px-3 py-1.5 text-white transition hover:bg-primary-dark"
+              class="mt-3 min-h-11 inline-flex items-center justify-center rounded bg-primary px-3 py-1.5 text-white transition hover:bg-primary-dark"
               @click="loadProductTypes"
             >
               Tentar novamente
@@ -1630,61 +1712,100 @@ async function submitSinglePrice(): Promise<void> {
             Nenhum tipo de produto cadastrado ainda.
           </div>
 
-          <div v-else class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-            <table class="w-full min-w-[640px]">
-              <caption class="sr-only">Lista de tipos de produto cadastrados</caption>
-              <thead class="bg-gray-50">
-                <tr>
-                  <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
-                    <button type="button" class="inline-flex items-center gap-1" @click="toggleProductTypeSort('name')">
-                      Nome
-                      <span>{{ getSortIndicator(productTypeSort, 'name') }}</span>
-                    </button>
-                  </th>
-                  <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
-                    <button
-                      type="button"
-                      class="inline-flex items-center gap-1"
-                      @click="toggleProductTypeSort('profit_margin')"
-                    >
-                      Margem %
-                      <span>{{ getSortIndicator(productTypeSort, 'profit_margin') }}</span>
-                    </button>
-                  </th>
-                  <th scope="col" class="px-6 py-3 text-center text-sm font-semibold text-gray-700">Ações</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-200">
-                <tr v-for="item in sortedProductTypes" :key="item.id" class="hover:bg-gray-50">
-                  <td class="px-6 py-4 text-sm text-gray-900">{{ item.name }}</td>
-                  <td class="px-6 py-4 text-sm text-gray-700">{{ formatProfitMargin(item.profit_margin) }}</td>
-                  <td class="px-6 py-4">
-                    <div class="flex items-center justify-center gap-2">
+          <div v-else>
+            <div class="hidden overflow-x-auto rounded-lg border border-gray-200 bg-white md:block">
+              <table class="w-full min-w-[640px]">
+                <caption class="sr-only">Lista de tipos de produto cadastrados</caption>
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                      <button type="button" class="inline-flex items-center gap-1" @click="toggleProductTypeSort('name')">
+                        Nome
+                        <span>{{ getSortIndicator(productTypeSort, 'name') }}</span>
+                      </button>
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
                       <button
                         type="button"
-                        aria-label="Editar tipo"
-                        class="rounded p-2 text-primary transition hover:bg-gray-100"
-                        @click="openEditProductTypeModal(item)"
+                        class="inline-flex items-center gap-1"
+                        @click="toggleProductTypeSort('profit_margin')"
                       >
-                        ✏️
+                        Margem %
+                        <span>{{ getSortIndicator(productTypeSort, 'profit_margin') }}</span>
                       </button>
-                      <button
-                        type="button"
-                        aria-label="Desativar tipo"
-                        class="rounded p-2 text-danger transition hover:bg-red-50"
-                        @click="deactivateProductType(item.id)"
-                      >
-                        🗑️
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-center text-sm font-semibold text-gray-700">Ações</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                  <tr v-for="item in sortedProductTypes" :key="item.id" class="hover:bg-gray-50">
+                    <td class="px-6 py-4 text-sm text-gray-900">{{ item.name }}</td>
+                    <td class="px-6 py-4 text-sm text-gray-700">{{ formatProfitMargin(item.profit_margin) }}</td>
+                    <td class="px-6 py-4">
+                      <div class="flex items-center justify-center gap-2">
+                        <button
+                          type="button"
+                          aria-label="Editar tipo"
+                          class="rounded p-2 text-primary transition hover:bg-gray-100"
+                          @click="openEditProductTypeModal(item)"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Desativar tipo"
+                          class="rounded p-2 text-danger transition hover:bg-red-50"
+                          @click="deactivateProductType(item.id)"
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <ul class="space-y-2 md:hidden">
+              <li
+                v-for="item in sortedProductTypes"
+                :key="item.id"
+                class="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm"
+              >
+                <div>
+                  <p class="text-sm font-semibold text-gray-900">{{ item.name }}</p>
+                  <p class="mt-0.5 text-xs text-gray-400">
+                    Margem:
+                    <span class="font-medium text-gray-700">
+                      {{ formatProfitMargin(item.profit_margin) }}
+                    </span>
+                  </p>
+                </div>
+
+                <div class="flex gap-2">
+                  <button
+                    type="button"
+                    class="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-gray-200 text-primary transition hover:bg-primary/5"
+                    :aria-label="`Editar tipo ${item.name}`"
+                    @click="openEditProductTypeModal(item)"
+                  >
+                    ✏️
+                  </button>
+                  <button
+                    type="button"
+                    class="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-red-100 text-danger transition hover:bg-danger/5"
+                    :aria-label="`Desativar tipo ${item.name}`"
+                    @click="deactivateProductType(item.id)"
+                  >
+                    🗑️
+                  </button>
+                </div>
+              </li>
+            </ul>
           </div>
         </section>
 
-        <section v-if="activeTab === 'prices' && isAdmin" class="mt-6">
+        <section v-if="activeTab === 'prices' && (isAdmin || canManageProductTypes)" class="mt-6">
           <div class="mb-4 flex justify-end">
             <button
               type="button"
@@ -1699,106 +1820,152 @@ async function submitSinglePrice(): Promise<void> {
             <div v-for="index in 6" :key="index" class="h-12 animate-pulse rounded bg-gray-100"></div>
           </div>
 
-          <div v-else class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-            <table class="w-full min-w-[1120px]">
-              <caption class="sr-only">Tabela de precos e margens dos produtos</caption>
-              <thead class="bg-gray-50">
-                <tr>
-                  <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
-                    <button type="button" class="inline-flex items-center gap-1" @click="togglePriceSort('name')">
-                      Nome
-                      <span>{{ getSortIndicator(priceSort, 'name') }}</span>
-                    </button>
-                  </th>
-                  <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
-                    <button type="button" class="inline-flex items-center gap-1" @click="togglePriceSort('type')">
-                      Tipo
-                      <span>{{ getSortIndicator(priceSort, 'type') }}</span>
-                    </button>
-                  </th>
-                  <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
-                    <button type="button" class="inline-flex items-center gap-1" @click="togglePriceSort('brand')">
-                      Marca
-                      <span>{{ getSortIndicator(priceSort, 'brand') }}</span>
-                    </button>
-                  </th>
-                  <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
-                    <button type="button" class="inline-flex items-center gap-1" @click="togglePriceSort('cost')">
-                      Custo
-                      <span>{{ getSortIndicator(priceSort, 'cost') }}</span>
-                    </button>
-                  </th>
-                  <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
-                    <button type="button" class="inline-flex items-center gap-1" @click="togglePriceSort('margin')">
-                      Margem %
-                      <span>{{ getSortIndicator(priceSort, 'margin') }}</span>
-                    </button>
-                  </th>
-                  <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
-                    <button type="button" class="inline-flex items-center gap-1" @click="togglePriceSort('sale')">
-                      Preço de Venda
-                      <span>{{ getSortIndicator(priceSort, 'sale') }}</span>
-                    </button>
-                  </th>
-                  <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
-                    <button type="button" class="inline-flex items-center gap-1" @click="togglePriceSort('stock')">
-                      Estoque
-                      <span>{{ getSortIndicator(priceSort, 'stock') }}</span>
-                    </button>
-                  </th>
-                  <th scope="col" class="px-6 py-3 text-center text-sm font-semibold text-gray-700">Ações</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-200">
-                <tr v-for="product in sortedProductsForPrices" :key="product.id" class="hover:bg-gray-50">
-                  <td class="px-6 py-4 text-sm text-gray-700">{{ product.name }}</td>
-                  <td class="px-6 py-4 text-sm text-gray-700">{{ product.product_type?.name ?? "-" }}</td>
-                  <td class="px-6 py-4 text-sm text-gray-700">{{ product.brand?.name ?? "—" }}</td>
-                  <td class="px-6 py-4 text-sm text-gray-700">{{ formatCents(product.cost_price_cents) }}</td>
-                  <td class="px-6 py-4 text-sm text-gray-700">{{ formatMargin(product) }}</td>
-                  <td class="px-6 py-4 text-sm text-gray-700">{{ formatCents(product.price_cents) }}</td>
-                  <td class="px-6 py-4 text-sm">
-                    <span
-                      :class="[
-                        'font-semibold',
-                        product.stock_quantity < product.min_stock_alert ? 'text-danger' : 'text-gray-700',
-                      ]"
-                    >
-                      {{ formatStock(product.stock_quantity, product.is_bulk) }}
-                    </span>
-                  </td>
-                  <td class="px-6 py-4 text-center">
-                    <button
-                      type="button"
-                      aria-label="Editar preço"
-                      class="rounded p-2 text-primary transition hover:bg-gray-100"
-                      @click="openSinglePriceModal(product)"
-                    >
-                      ⚙️
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+          <div v-else>
+            <div class="hidden overflow-x-auto rounded-lg border border-gray-200 bg-white md:block">
+              <table class="w-full min-w-[1120px]">
+                <caption class="sr-only">Tabela de precos e margens dos produtos</caption>
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                      <button type="button" class="inline-flex items-center gap-1" @click="togglePriceSort('name')">
+                        Nome
+                        <span>{{ getSortIndicator(priceSort, 'name') }}</span>
+                      </button>
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                      <button type="button" class="inline-flex items-center gap-1" @click="togglePriceSort('type')">
+                        Tipo
+                        <span>{{ getSortIndicator(priceSort, 'type') }}</span>
+                      </button>
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                      <button type="button" class="inline-flex items-center gap-1" @click="togglePriceSort('brand')">
+                        Marca
+                        <span>{{ getSortIndicator(priceSort, 'brand') }}</span>
+                      </button>
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                      <button type="button" class="inline-flex items-center gap-1" @click="togglePriceSort('cost')">
+                        Custo
+                        <span>{{ getSortIndicator(priceSort, 'cost') }}</span>
+                      </button>
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                      <button type="button" class="inline-flex items-center gap-1" @click="togglePriceSort('margin')">
+                        Margem %
+                        <span>{{ getSortIndicator(priceSort, 'margin') }}</span>
+                      </button>
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                      <button type="button" class="inline-flex items-center gap-1" @click="togglePriceSort('sale')">
+                        Preço de Venda
+                        <span>{{ getSortIndicator(priceSort, 'sale') }}</span>
+                      </button>
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                      <button type="button" class="inline-flex items-center gap-1" @click="togglePriceSort('stock')">
+                        Estoque
+                        <span>{{ getSortIndicator(priceSort, 'stock') }}</span>
+                      </button>
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-center text-sm font-semibold text-gray-700">Ações</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                  <tr v-for="product in sortedProductsForPrices" :key="product.id" class="hover:bg-gray-50">
+                    <td class="px-6 py-4 text-sm text-gray-700">{{ product.name }}</td>
+                    <td class="px-6 py-4 text-sm text-gray-700">{{ product.product_type?.name ?? "-" }}</td>
+                    <td class="px-6 py-4 text-sm text-gray-700">{{ product.brand?.name ?? "—" }}</td>
+                    <td class="px-6 py-4 text-sm text-gray-700">{{ formatCents(product.cost_price_cents) }}</td>
+                    <td class="px-6 py-4 text-sm text-gray-700">{{ formatMargin(product) }}</td>
+                    <td class="px-6 py-4 text-sm text-gray-700">{{ formatCents(product.price_cents) }}</td>
+                    <td class="px-6 py-4 text-sm">
+                      <span
+                        :class="[
+                          'font-semibold',
+                          product.stock_quantity < product.min_stock_alert ? 'text-danger' : 'text-gray-700',
+                        ]"
+                      >
+                        {{ formatStock(product.stock_quantity, product.is_bulk) }}
+                      </span>
+                    </td>
+                    <td class="px-6 py-4 text-center">
+                      <button
+                        type="button"
+                        aria-label="Editar preço"
+                        class="rounded p-2 text-primary transition hover:bg-gray-100"
+                        @click="openSinglePriceModal(product)"
+                      >
+                        ⚙️
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <ul class="space-y-2 md:hidden">
+              <li
+                v-for="product in sortedProductsForPrices"
+                :key="product.id"
+                class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+              >
+                <div class="mb-3 flex items-start justify-between gap-2">
+                  <div class="min-w-0">
+                    <p class="text-sm font-semibold text-gray-900">{{ product.name }}</p>
+                    <p class="truncate text-xs text-gray-400">{{ product.product_type?.name ?? "—" }}</p>
+                  </div>
+                  <span class="shrink-0 text-xs text-gray-400">
+                    {{ formatStock(product.stock_quantity, product.is_bulk) }}
+                  </span>
+                </div>
+
+                <div class="grid grid-cols-3 gap-2 text-center">
+                  <div class="rounded-lg bg-surface px-2 py-1.5">
+                    <p class="text-xs text-gray-400">Custo</p>
+                    <p class="text-sm font-bold text-gray-800">
+                      {{ formatCents(product.cost_price_cents) }}
+                    </p>
+                  </div>
+                  <div class="rounded-lg bg-surface px-2 py-1.5">
+                    <p class="text-xs text-gray-400">Margem</p>
+                    <p class="text-sm font-bold text-primary">
+                      {{ formatMargin(product) }}
+                    </p>
+                  </div>
+                  <div class="rounded-lg bg-surface px-2 py-1.5">
+                    <p class="text-xs text-gray-400">Venda</p>
+                    <p class="text-sm font-bold text-success">
+                      {{ formatCents(product.price_cents) }}
+                    </p>
+                  </div>
+                </div>
+              </li>
+            </ul>
           </div>
         </section>
 
         <div
           v-if="showProductModal"
-          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+          class="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="product-form-modal-title"
-          @click.self="closeProductModal"
         >
-          <div class="w-full max-w-2xl rounded-xl bg-white p-6 shadow-xl">
+          <div class="absolute inset-0 bg-black/50" @click="closeProductModal" />
+          <div
+            ref="productModalScrollableRef"
+            class="relative z-10 w-full max-h-[92vh] overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:max-w-2xl sm:rounded-2xl"
+          >
+            <div class="mx-auto mt-3 h-1 w-12 rounded-full bg-gray-200 sm:hidden" />
+            <div class="p-4 sm:p-6">
             <div class="mb-4 flex items-center justify-between">
               <h2 id="product-form-modal-title" class="text-xl font-bold text-gray-900">
                 {{ isProductEditMode ? "Editar Produto" : "Novo Produto" }}
               </h2>
               <button
                 type="button"
-                class="rounded-lg p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600"
+                class="rounded-lg p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-600"
                 aria-label="Fechar modal"
                 @click="closeProductModal"
               >
@@ -1823,7 +1990,12 @@ async function submitSinglePrice(): Promise<void> {
               {{ productFormErrors.submit }}
             </div>
 
-            <form class="grid grid-cols-1 gap-4 md:grid-cols-2" novalidate @submit.prevent="submitProductForm">
+            <form
+              id="product-form"
+              class="grid grid-cols-1 gap-4 md:grid-cols-2"
+              novalidate
+              @submit.prevent="submitProductForm"
+            >
               <div class="md:col-span-2">
                 <label for="product_name" class="mb-1 block text-sm font-medium text-gray-700">Nome *</label>
                 <input
@@ -1832,7 +2004,7 @@ async function submitSinglePrice(): Promise<void> {
                   type="text"
                   autofocus
                   maxlength="100"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                 />
                 <p v-if="productFormErrors.name" class="mt-1 text-xs text-danger">{{ productFormErrors.name[0] }}</p>
               </div>
@@ -1843,7 +2015,7 @@ async function submitSinglePrice(): Promise<void> {
                   <select
                     id="product_brand"
                     v-model="productFormData.brand_id"
-                    class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   >
                     <option value="">Sem marca</option>
                     <option v-for="item in brands" :key="item.id" :value="item.id">
@@ -1869,14 +2041,14 @@ async function submitSinglePrice(): Promise<void> {
                     v-model="brandFormName"
                     type="text"
                     maxlength="100"
-                    class="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   />
                   <p v-if="brandFormErrors.name" class="mt-1 text-xs text-danger">{{ brandFormErrors.name[0] }}</p>
                   <p v-if="brandFormErrors.submit" class="mt-1 text-xs text-danger">{{ brandFormErrors.submit }}</p>
                   <div class="mt-3 flex justify-end gap-2">
                     <button
                       type="button"
-                      class="rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50"
+                      class="min-h-11 inline-flex items-center justify-center rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50"
                       @click="closeInlineBrandCreate"
                     >
                       Cancelar
@@ -1884,7 +2056,7 @@ async function submitSinglePrice(): Promise<void> {
                     <button
                       type="button"
                       :disabled="loadingBrandSubmit"
-                      class="rounded bg-primary px-3 py-1.5 text-xs font-medium text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
+                      class="min-h-11 inline-flex items-center justify-center rounded bg-primary px-3 py-1.5 text-xs font-medium text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
                       @click="submitInlineBrandCreate"
                     >
                       {{ loadingBrandSubmit ? "Salvando..." : "Salvar" }}
@@ -1902,7 +2074,7 @@ async function submitSinglePrice(): Promise<void> {
                   inputmode="numeric"
                   maxlength="13"
                   placeholder="EAN-8 ou EAN-13"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   @input="handleBarcodeInput"
                 />
                 <p v-if="productFormErrors.barcode" class="mt-1 text-xs text-danger">{{ productFormErrors.barcode[0] }}</p>
@@ -1915,7 +2087,7 @@ async function submitSinglePrice(): Promise<void> {
                   v-model="productFormData.description"
                   maxlength="255"
                   rows="2"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                 ></textarea>
                 <p v-if="productFormErrors.description" class="mt-1 text-xs text-danger">{{ productFormErrors.description[0] }}</p>
               </div>
@@ -1925,7 +2097,7 @@ async function submitSinglePrice(): Promise<void> {
                 <select
                   id="product_weight_unit"
                   :value="productFormData.weight_unit"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   @change="handleWeightUnitChange"
                 >
                   <option value="">Selecione</option>
@@ -1945,7 +2117,7 @@ async function submitSinglePrice(): Promise<void> {
                   inputmode="decimal"
                   placeholder="Ex.: 500 ou 1.5"
                   :disabled="productFormData.weight_unit === 'un' || productFormData.is_bulk"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:bg-gray-100"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:bg-gray-100"
                   @input="handleWeightValueInput"
                 />
                 <p v-if="productFormErrors.weight_value" class="mt-1 text-xs text-danger">{{ productFormErrors.weight_value[0] }}</p>
@@ -1971,7 +2143,7 @@ async function submitSinglePrice(): Promise<void> {
                 <select
                   id="product_type"
                   v-model="productFormData.product_type_id"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                 >
                   <option value="">Sem tipo</option>
                   <option v-for="item in productTypes" :key="item.id" :value="item.id">
@@ -1989,7 +2161,7 @@ async function submitSinglePrice(): Promise<void> {
                   inputmode="numeric"
                   placeholder="R$ 0,00"
                   :readonly="isSalePriceAutoCalculated"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 read-only:cursor-not-allowed read-only:bg-gray-100"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 read-only:cursor-not-allowed read-only:bg-gray-100"
                   @input="handlePriceInput"
                 />
                 <p v-if="isSalePriceAutoCalculated" class="mt-1 text-xs text-gray-600">
@@ -2006,7 +2178,7 @@ async function submitSinglePrice(): Promise<void> {
                   type="text"
                   inputmode="numeric"
                   placeholder="R$ 0,00"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   @input="handleCostPriceInput"
                 />
                 <p v-if="productFormErrors.cost_price_cents" class="mt-1 text-xs text-danger">{{ productFormErrors.cost_price_cents[0] }}</p>
@@ -2021,7 +2193,7 @@ async function submitSinglePrice(): Promise<void> {
                   min="0"
                   inputmode="numeric"
                   :disabled="isProductEditMode"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:bg-gray-100"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:bg-gray-100"
                 />
                 <p v-if="productFormErrors.stock_quantity" class="mt-1 text-xs text-danger">{{ productFormErrors.stock_quantity[0] }}</p>
               </div>
@@ -2034,7 +2206,7 @@ async function submitSinglePrice(): Promise<void> {
                   type="number"
                   min="0"
                   inputmode="numeric"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                 />
                 <p v-if="productFormErrors.min_stock_alert" class="mt-1 text-xs text-danger">{{ productFormErrors.min_stock_alert[0] }}</p>
               </div>
@@ -2048,9 +2220,10 @@ async function submitSinglePrice(): Promise<void> {
                   Cancelar
                 </button>
                 <button
-                  type="submit"
+                  type="button"
                   :disabled="loadingProductSubmit"
                   class="flex items-center gap-2 rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
+                  @click="submitProductForm"
                 >
                   <svg
                     v-if="loadingProductSubmit"
@@ -2066,23 +2239,26 @@ async function submitSinglePrice(): Promise<void> {
                 </button>
               </div>
             </form>
+            </div>
           </div>
         </div>
 
         <div
           v-if="showStockModal"
-          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+          class="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="product-stock-modal-title"
-          @click.self="closeStockModal"
         >
-          <div class="w-full max-w-xl rounded-xl bg-white p-6 shadow-xl">
+          <div class="absolute inset-0 bg-black/50" @click="closeStockModal" />
+          <div class="relative z-10 w-full max-h-[92vh] overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:max-w-xl sm:rounded-2xl">
+            <div class="mx-auto mt-3 h-1 w-12 rounded-full bg-gray-200 sm:hidden" />
+            <div class="p-4 sm:p-6">
             <div class="mb-4 flex items-center justify-between">
               <h2 id="product-stock-modal-title" class="text-xl font-bold text-gray-900">Entrada de Estoque</h2>
               <button
                 type="button"
-                class="rounded-lg p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600"
+                class="rounded-lg p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-600"
                 aria-label="Fechar popup"
                 @click="closeStockModal"
               >
@@ -2165,7 +2341,7 @@ async function submitSinglePrice(): Promise<void> {
                       :value="stockAdditionAmount"
                       type="text"
                       inputmode="numeric"
-                      class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                       @input="handleStockAdditionInput"
                     />
                   </div>
@@ -2174,7 +2350,7 @@ async function submitSinglePrice(): Promise<void> {
                     <select
                       id="stock_add_type"
                       v-model="stockAdditionType"
-                      class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                     >
                       <option value="unit">Unidade</option>
                       <option value="kg">kg</option>
@@ -2193,7 +2369,7 @@ async function submitSinglePrice(): Promise<void> {
                       type="text"
                       inputmode="numeric"
                       placeholder="R$ 0,00"
-                      class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                       @input="handleStockEntryUnitCostInput"
                     />
                   </div>
@@ -2207,7 +2383,7 @@ async function submitSinglePrice(): Promise<void> {
                       v-model="stockEntryDescription"
                       type="text"
                       maxlength="255"
-                      class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                     />
                   </div>
                 </div>
@@ -2250,25 +2426,28 @@ async function submitSinglePrice(): Promise<void> {
                 </button>
               </div>
             </div>
+            </div>
           </div>
         </div>
 
         <div
           v-if="showProductTypeModal"
-          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+          class="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="product-type-modal-title"
-          @click.self="closeProductTypeModal"
         >
-          <div class="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+          <div class="absolute inset-0 bg-black/50" @click="closeProductTypeModal" />
+          <div class="relative z-10 w-full max-h-[92vh] overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:max-w-md sm:rounded-2xl">
+            <div class="mx-auto mt-3 h-1 w-12 rounded-full bg-gray-200 sm:hidden" />
+            <div class="p-4 sm:p-6">
             <div class="mb-4 flex items-center justify-between">
               <h2 id="product-type-modal-title" class="text-xl font-bold text-gray-900">
                 {{ isProductTypeEditMode ? "Editar Tipo de Produto" : "Novo Tipo de Produto" }}
               </h2>
               <button
                 type="button"
-                class="rounded-lg p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600"
+                class="rounded-lg p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-600"
                 aria-label="Fechar modal"
                 @click="closeProductTypeModal"
               >
@@ -2302,7 +2481,7 @@ async function submitSinglePrice(): Promise<void> {
                   type="text"
                   autofocus
                   maxlength="50"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                 />
                 <p v-if="productTypeFormErrors.name" class="mt-1 text-xs text-danger">{{ productTypeFormErrors.name[0] }}</p>
               </div>
@@ -2317,7 +2496,7 @@ async function submitSinglePrice(): Promise<void> {
                   type="text"
                   inputmode="decimal"
                   placeholder="Ex.: 35 ou 10,50"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   @input="handleProductTypeProfitMarginInput"
                 />
                 <p v-if="productTypeFormErrors.profit_margin" class="mt-1 text-xs text-danger">
@@ -2352,23 +2531,26 @@ async function submitSinglePrice(): Promise<void> {
                 </button>
               </div>
             </form>
+            </div>
           </div>
         </div>
 
         <div
           v-if="showBulkPriceModal"
-          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+          class="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="product-bulk-price-modal-title"
-          @click.self="closeBulkPriceModal"
         >
-          <div class="w-full max-w-xl rounded-xl bg-white p-6 shadow-xl">
+          <div class="absolute inset-0 bg-black/50" @click="closeBulkPriceModal" />
+          <div class="relative z-10 w-full max-h-[92vh] overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:max-w-xl sm:rounded-2xl">
+            <div class="mx-auto mt-3 h-1 w-12 rounded-full bg-gray-200 sm:hidden" />
+            <div class="p-4 sm:p-6">
             <div class="mb-4 flex items-center justify-between">
               <h2 id="product-bulk-price-modal-title" class="text-xl font-bold text-gray-900">Definir Margem de Lucro</h2>
               <button
                 type="button"
-                class="rounded-lg p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600"
+                class="rounded-lg p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-600"
                 aria-label="Fechar modal"
                 @click="closeBulkPriceModal"
               >
@@ -2392,7 +2574,7 @@ async function submitSinglePrice(): Promise<void> {
                   id="bulk_product_type"
                   v-model="bulkPriceFormData.product_type_id"
                   autofocus
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                 >
                   <option value="">Selecione</option>
                   <option v-for="item in productTypes" :key="item.id" :value="item.id">
@@ -2407,7 +2589,7 @@ async function submitSinglePrice(): Promise<void> {
                   id="bulk_brand"
                   v-model="bulkPriceFormData.brand_id"
                   :disabled="!bulkPriceFormData.product_type_id || loadingBulkBrands"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                 >
                   <option v-if="!bulkPriceFormData.product_type_id" value="">Selecione um tipo primeiro</option>
                   <option v-else value="">Todas</option>
@@ -2435,7 +2617,7 @@ async function submitSinglePrice(): Promise<void> {
                   type="text"
                   inputmode="decimal"
                   placeholder="Ex.: 30"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   @input="handleBulkMarginInput"
                 />
               </div>
@@ -2482,23 +2664,26 @@ async function submitSinglePrice(): Promise<void> {
                 </button>
               </div>
             </div>
+            </div>
           </div>
         </div>
 
         <div
           v-if="showSinglePriceModal"
-          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+          class="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="product-single-price-modal-title"
-          @click.self="closeSinglePriceModal"
         >
-          <div class="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+          <div class="absolute inset-0 bg-black/50" @click="closeSinglePriceModal" />
+          <div class="relative z-10 w-full max-h-[92vh] overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:max-w-md sm:rounded-2xl">
+            <div class="mx-auto mt-3 h-1 w-12 rounded-full bg-gray-200 sm:hidden" />
+            <div class="p-4 sm:p-6">
             <div class="mb-4 flex items-center justify-between">
               <h2 id="product-single-price-modal-title" class="text-xl font-bold text-gray-900">Editar Preço</h2>
               <button
                 type="button"
-                class="rounded-lg p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600"
+                class="rounded-lg p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-600"
                 aria-label="Fechar modal"
                 @click="closeSinglePriceModal"
               >
@@ -2523,7 +2708,7 @@ async function submitSinglePrice(): Promise<void> {
                   :value="singleCostInput"
                   type="text"
                   inputmode="numeric"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   @input="handleSingleCostInput"
                 />
               </div>
@@ -2535,7 +2720,7 @@ async function submitSinglePrice(): Promise<void> {
                   :value="singleMarginInput"
                   type="text"
                   inputmode="decimal"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   @input="handleSingleMarginInput"
                 />
               </div>
@@ -2547,7 +2732,7 @@ async function submitSinglePrice(): Promise<void> {
                   :value="singleSaleInput"
                   type="text"
                   inputmode="numeric"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   @input="handleSingleSaleInput"
                 />
               </div>
@@ -2583,6 +2768,7 @@ async function submitSinglePrice(): Promise<void> {
                   <span>{{ singlePriceLoading ? "Salvando..." : "Salvar" }}</span>
                 </button>
               </div>
+            </div>
             </div>
           </div>
         </div>

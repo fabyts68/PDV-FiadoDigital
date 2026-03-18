@@ -48,6 +48,18 @@ interface PaymentFormErrors {
   submit?: string;
 }
 
+type WhatsAppChargeType = "full" | "partial";
+
+interface WhatsAppFormData {
+  charge_type: WhatsAppChargeType;
+  amount_input: string;
+}
+
+interface WhatsAppFormErrors {
+  amount_cents?: string[];
+  submit?: string;
+}
+
 type SortBy = "name" | "credit_limit_cents" | "payment_due_day" | "current_debt_cents" | "is_active";
 type SortOrder = "asc" | "desc";
 type TabKey = "customers" | "purchase-history" | "payment-history";
@@ -104,6 +116,21 @@ const paymentFormData = ref<PaymentFormData>({
 });
 const paymentFormErrors = ref<PaymentFormErrors>({});
 const paymentLoading = ref(false);
+
+const showWhatsAppModal = ref(false);
+const selectedWhatsAppCustomer = ref<Customer | null>(null);
+const whatsAppFormData = ref<WhatsAppFormData>({
+  charge_type: "full",
+  amount_input: "",
+});
+const whatsAppFormErrors = ref<WhatsAppFormErrors>({});
+
+const whatsappMessageVencido = ref(
+  "Olá [NOME], notamos que o seu fiado de [TOTAL] venceu em [VENCIMENTO]. Como podemos te ajudar a regularizar?",
+);
+const whatsappMessageAVencer = ref(
+  "Olá [NOME], passando para lembrar que o seu fiado de [TOTAL] vence em [VENCIMENTO]. Se precisar, estamos à disposição.",
+);
 
 const { showToast, toastMessage, toastType, toast } = useToast();
 const { showConfirm, confirmTitle, confirmMessage, confirmLabel, confirm, onConfirm, onCancel } = useConfirm();
@@ -256,6 +283,7 @@ const filteredHistoryCustomers = computed(() => {
 
 onMounted(async () => {
   await loadCustomers();
+  loadWhatsAppSettings();
   window.addEventListener("keydown", handleEscapeKey);
 });
 
@@ -326,6 +354,11 @@ function handleEscapeKey(event: KeyboardEvent): void {
 
   if (showPaymentModal.value) {
     closePaymentModal();
+    return;
+  }
+
+  if (showWhatsAppModal.value) {
+    closeWhatsAppModal();
     return;
   }
 
@@ -535,6 +568,19 @@ function handlePaymentAmountInput(event: Event): void {
   paymentFormData.value.amount_input = formatCents(cents);
 }
 
+function handleWhatsAppAmountInput(event: Event): void {
+  const target = event.target as HTMLInputElement;
+  const digitsOnly = target.value.replace(/\D/g, "");
+
+  if (!digitsOnly) {
+    whatsAppFormData.value.amount_input = "";
+    return;
+  }
+
+  const cents = Number.parseInt(digitsOnly, 10);
+  whatsAppFormData.value.amount_input = formatCents(cents);
+}
+
 function handlePaymentPinInput(event: Event): void {
   const target = event.target as HTMLInputElement;
   paymentFormData.value.pin = target.value.replace(/\D/g, "").slice(0, 6);
@@ -553,6 +599,14 @@ function formatPaymentDueDay(day: number | null): string {
   return `Todo dia ${day}`;
 }
 
+function formatWhatsAppDueDate(day: number | null): string {
+  if (!day) {
+    return "Não informado";
+  }
+
+  return `todo dia ${day}`;
+}
+
 function toggleDebtVisibility(customerId: string): void {
   const currentVisibility = debtVisibilityByCustomerId.value[customerId] ?? false;
   debtVisibilityByCustomerId.value[customerId] = !currentVisibility;
@@ -568,6 +622,36 @@ function debouncedSearch(): void {
   searchTimeoutId = setTimeout(() => {
     loadCustomers();
   }, 400);
+}
+
+function toHistoryPeriodParam(rawValue: unknown, min: number, max: number): string | null {
+  const value = typeof rawValue === "number" ? rawValue : Number(rawValue);
+
+  if (!Number.isInteger(value) || value < min || value > max) {
+    return null;
+  }
+
+  return String(value);
+}
+
+function createHistorySearchParams(page: number, perPage: number): URLSearchParams {
+  const params = new URLSearchParams({
+    page: String(page),
+    per_page: String(perPage),
+  });
+
+  const month = toHistoryPeriodParam(selectedHistoryMonth.value, 1, 12);
+  const year = toHistoryPeriodParam(selectedHistoryYear.value, 2000, 9999);
+
+  if (month) {
+    params.set("month", month);
+  }
+
+  if (year) {
+    params.set("year", year);
+  }
+
+  return params;
 }
 
 function toggleSortOrder(column: SortBy): void {
@@ -661,12 +745,7 @@ async function loadFiadoHistory(): Promise<void> {
   fiadoHistoryError.value = null;
 
   try {
-    const params = new URLSearchParams({
-      page: String(fiadoHistoryPage.value),
-      per_page: String(fiadoHistoryPerPage.value),
-      month: String(selectedHistoryMonth.value),
-      year: String(selectedHistoryYear.value),
-    });
+    const params = createHistorySearchParams(fiadoHistoryPage.value, fiadoHistoryPerPage.value);
 
     const response = await authenticatedFetch(
       `/api/customers/${selectedHistoryCustomer.value.id}/fiado-history?${params}`,
@@ -704,12 +783,7 @@ async function loadPaymentHistory(): Promise<void> {
   paymentHistoryError.value = null;
 
   try {
-    const params = new URLSearchParams({
-      page: String(paymentHistoryPage.value),
-      per_page: String(paymentHistoryPerPage.value),
-      month: String(selectedHistoryMonth.value),
-      year: String(selectedHistoryYear.value),
-    });
+    const params = createHistorySearchParams(paymentHistoryPage.value, paymentHistoryPerPage.value);
 
     const response = await authenticatedFetch(
       `/api/customers/${selectedHistoryCustomer.value.id}/payment-history?${params}`,
@@ -841,6 +915,16 @@ function openPaymentModal(customer: Customer): void {
   showPaymentModal.value = true;
 }
 
+function openWhatsAppModal(customer: Customer): void {
+  selectedWhatsAppCustomer.value = customer;
+  whatsAppFormData.value = {
+    charge_type: "full",
+    amount_input: "",
+  };
+  whatsAppFormErrors.value = {};
+  showWhatsAppModal.value = true;
+}
+
 function closeModal(): void {
   showModal.value = false;
   formErrors.value = {};
@@ -856,8 +940,76 @@ function closePaymentModal(): void {
   paymentFormErrors.value = {};
 }
 
+function closeWhatsAppModal(): void {
+  showWhatsAppModal.value = false;
+  selectedWhatsAppCustomer.value = null;
+  whatsAppFormData.value = {
+    charge_type: "full",
+    amount_input: "",
+  };
+  whatsAppFormErrors.value = {};
+}
+
 function showSuccessToast(message: string): void {
   toast(message);
+}
+
+function getWhatsAppPhoneDigits(customer: Customer | null): string {
+  if (!customer?.phone) {
+    return "";
+  }
+
+  return normalizePhoneDigits(customer.phone);
+}
+
+function getWhatsAppChargeAmountCents(): number | null {
+  if (!selectedWhatsAppCustomer.value) {
+    return null;
+  }
+
+  if (whatsAppFormData.value.charge_type === "full") {
+    return selectedWhatsAppCustomer.value.current_debt_cents;
+  }
+
+  return parseCurrencyToCents(whatsAppFormData.value.amount_input);
+}
+
+async function loadWhatsAppSettings(): Promise<void> {
+  try {
+    const response = await authenticatedFetch("/api/settings");
+
+    if (!response.ok) {
+      return;
+    }
+
+    const data = (await response.json()) as Record<string, unknown>;
+
+    if (typeof data.whatsapp_message_fiado_vencido === "string" && data.whatsapp_message_fiado_vencido.trim()) {
+      whatsappMessageVencido.value = data.whatsapp_message_fiado_vencido;
+    }
+
+    if (typeof data.whatsapp_message_fiado_a_vencer === "string" && data.whatsapp_message_fiado_a_vencer.trim()) {
+      whatsappMessageAVencer.value = data.whatsapp_message_fiado_a_vencer;
+    }
+  } catch {
+    // silently fall back to built-in defaults
+  }
+}
+
+function buildWhatsAppChargeMessage(customer: Customer, chargeAmountCents: number): string {
+  const today = new Date();
+  const dueDay = customer.payment_due_day;
+  const isOverdue = dueDay === null || today.getDate() > dueDay;
+  const template = isOverdue ? whatsappMessageVencido.value : whatsappMessageAVencer.value;
+  const dueDate = formatWhatsAppDueDate(dueDay);
+  const isPartial = whatsAppFormData.value.charge_type === "partial";
+  const totalDisplay = isPartial ? formatCents(chargeAmountCents) : formatCents(customer.current_debt_cents);
+
+  return template
+    .replace(/\[NOME\]/g, customer.name)
+    .replace(/\[TOTAL\]/g, totalDisplay)
+    .replace(/\[COBRANCA\]/g, formatCents(chargeAmountCents))
+    .replace(/\[VENCIMENTO\]/g, dueDate);
 }
 
 function validateForm(): boolean {
@@ -919,6 +1071,35 @@ function validatePaymentForm(): boolean {
   }
 
   return Object.keys(paymentFormErrors.value).length === 0;
+}
+
+function validateWhatsAppForm(): boolean {
+  whatsAppFormErrors.value = {};
+
+  if (!selectedWhatsAppCustomer.value) {
+    whatsAppFormErrors.value.submit = "Cliente não selecionado";
+    return false;
+  }
+
+  const phoneDigits = getWhatsAppPhoneDigits(selectedWhatsAppCustomer.value);
+
+  if (phoneDigits.length !== 11) {
+    whatsAppFormErrors.value.submit = "Cliente não possui telefone válido para WhatsApp";
+  }
+
+  if (whatsAppFormData.value.charge_type === "partial") {
+    const amountCents = parseCurrencyToCents(whatsAppFormData.value.amount_input);
+
+    if (amountCents === null || amountCents <= 0) {
+      whatsAppFormErrors.value.amount_cents = ["Valor da cobrança deve ser maior que zero"];
+    } else if (amountCents > selectedWhatsAppCustomer.value.current_debt_cents) {
+      whatsAppFormErrors.value.amount_cents = [
+        `Valor não pode ser maior que ${formatCents(selectedWhatsAppCustomer.value.current_debt_cents)}`,
+      ];
+    }
+  }
+
+  return Object.keys(whatsAppFormErrors.value).length === 0;
 }
 
 async function submitForm(): Promise<void> {
@@ -1047,6 +1228,30 @@ async function submitPaymentForm(): Promise<void> {
     paymentLoading.value = false;
   }
 }
+
+function submitWhatsAppForm(): void {
+  if (!validateWhatsAppForm()) {
+    return;
+  }
+
+  if (!selectedWhatsAppCustomer.value) {
+    return;
+  }
+
+  const phoneDigits = getWhatsAppPhoneDigits(selectedWhatsAppCustomer.value);
+  const chargeAmountCents = getWhatsAppChargeAmountCents();
+
+  if (!chargeAmountCents || chargeAmountCents <= 0) {
+    whatsAppFormErrors.value.submit = "Valor da cobrança inválido";
+    return;
+  }
+
+  const message = buildWhatsAppChargeMessage(selectedWhatsAppCustomer.value, chargeAmountCents);
+  const whatsappUrl = `https://wa.me/55${phoneDigits}?text=${encodeURIComponent(message)}`;
+
+  window.open(whatsappUrl, "_blank");
+  closeWhatsAppModal();
+}
 </script>
 
 <template>
@@ -1060,72 +1265,74 @@ async function submitPaymentForm(): Promise<void> {
         </div>
 
         <!-- Tabs -->
-        <div class="mt-6 flex items-center gap-2 border-b border-gray-200">
-          <button
-            type="button"
-            :class="[
-              'rounded-t-lg px-4 py-2 text-sm font-semibold transition',
-              activeTab === 'customers'
-                ? 'bg-primary text-white'
-                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
-            ]"
-            @click="activeTab = 'customers'"
-          >
-            Clientes
-          </button>
-          <button
-            type="button"
-            :class="[
-              'rounded-t-lg px-4 py-2 text-sm font-semibold transition',
-              activeTab === 'purchase-history'
-                ? 'bg-primary text-white'
-                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
-            ]"
-            @click="activeTab = 'purchase-history'"
-          >
-            Histórico de Compras
-          </button>
-          <button
-            type="button"
-            :class="[
-              'rounded-t-lg px-4 py-2 text-sm font-semibold transition',
-              activeTab === 'payment-history'
-                ? 'bg-primary text-white'
-                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
-            ]"
-            @click="activeTab = 'payment-history'"
-          >
-            Histórico de Pagamentos
-          </button>
+        <div class="mt-6 -mx-3 overflow-x-auto px-3 md:mx-0 md:px-0">
+          <div class="flex min-w-max gap-1 border-b border-gray-200 md:min-w-0">
+            <button
+              type="button"
+              :class="[
+                'min-h-11 whitespace-nowrap rounded-t-lg px-4 py-2 text-sm font-semibold transition',
+                activeTab === 'customers'
+                  ? 'bg-primary text-white'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+              ]"
+              @click="activeTab = 'customers'"
+            >
+              Clientes
+            </button>
+            <button
+              type="button"
+              :class="[
+                'min-h-11 whitespace-nowrap rounded-t-lg px-4 py-2 text-sm font-semibold transition',
+                activeTab === 'purchase-history'
+                  ? 'bg-primary text-white'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+              ]"
+              @click="activeTab = 'purchase-history'"
+            >
+              Histórico de Compras
+            </button>
+            <button
+              type="button"
+              :class="[
+                'min-h-11 whitespace-nowrap rounded-t-lg px-4 py-2 text-sm font-semibold transition',
+                activeTab === 'payment-history'
+                  ? 'bg-primary text-white'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+              ]"
+              @click="activeTab = 'payment-history'"
+            >
+              Histórico de Pagamentos
+            </button>
+          </div>
         </div>
 
         <!-- ==================== ABA: Clientes ==================== -->
         <section v-if="activeTab === 'customers'" class="mt-6">
-          <div class="mb-4 flex items-center justify-end">
+          <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <!-- Search Bar -->
+            <div class="flex flex-1 gap-2">
+              <input
+                v-model="searchInput"
+                type="text"
+                placeholder="Buscar por nome ou telefone..."
+                class="flex-1 rounded-lg border border-gray-300 px-4 py-2 text-base focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 md:text-sm"
+              />
+              <button
+                v-if="searchInput"
+                type="button"
+                @click="clearSearch"
+                class="min-h-11 rounded-lg bg-gray-200 px-4 text-sm font-medium text-gray-700 transition hover:bg-gray-300"
+              >
+                ✕
+              </button>
+            </div>
+
             <button
               type="button"
               @click="openCreateModal"
-              class="rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark"
+              class="min-h-11 w-full rounded-lg bg-primary px-4 text-sm font-medium text-white transition hover:bg-primary-dark sm:w-auto"
             >
               + Novo Cliente
-            </button>
-          </div>
-
-          <!-- Search Bar -->
-          <div class="mb-6 flex gap-2">
-            <input
-              v-model="searchInput"
-              type="text"
-              placeholder="Buscar por nome ou telefone..."
-              class="flex-1 rounded border border-gray-300 px-4 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-            />
-            <button
-              v-if="searchInput"
-              type="button"
-              @click="clearSearch"
-              class="rounded bg-gray-200 px-4 py-2 font-medium text-gray-700 transition hover:bg-gray-300"
-            >
-              ✕ Limpar
             </button>
           </div>
 
@@ -1158,158 +1365,314 @@ async function submitPaymentForm(): Promise<void> {
             Nenhum cliente cadastrado ainda.
           </div>
 
-          <!-- Table -->
-          <div v-else class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-          <table class="w-full min-w-[1200px]">
-            <caption class="sr-only">Lista de clientes cadastrados</caption>
-            <thead class="bg-gray-50">
-              <tr>
-                <th
-                  scope="col"
-                  class="cursor-pointer px-6 py-3 text-left text-sm font-semibold text-gray-700 transition hover:bg-gray-100"
-                  @click="toggleSortOrder('name')"
-                >
-                  <span class="flex items-center gap-2">
-                    Nome
-                    <span class="text-xs">{{ getSortIcon("name") }}</span>
-                  </span>
-                </th>
-                <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Telefone</th>
-                <th
-                  scope="col"
-                  class="cursor-pointer px-6 py-3 text-left text-sm font-semibold text-gray-700 transition hover:bg-gray-100"
-                  @click="toggleSortOrder('credit_limit_cents')"
-                >
-                  <span class="flex items-center gap-2">
-                    Limite de Fiado
-                    <span class="text-xs">{{ getSortIcon("credit_limit_cents") }}</span>
-                  </span>
-                </th>
-                <th
-                  scope="col"
-                  class="cursor-pointer px-6 py-3 text-left text-sm font-semibold text-gray-700 transition hover:bg-gray-100"
-                  @click="toggleSortOrder('payment_due_day')"
-                >
-                  <span class="flex items-center gap-2">
-                    Dia de Pagamento
-                    <span class="text-xs">{{ getSortIcon("payment_due_day") }}</span>
-                  </span>
-                </th>
-                <th
-                  scope="col"
-                  class="cursor-pointer px-6 py-3 text-left text-sm font-semibold text-gray-700 transition hover:bg-gray-100"
-                  @click="toggleSortOrder('current_debt_cents')"
-                >
-                  <span class="flex items-center gap-2">
-                    Fiado Atual
-                    <span class="text-xs">{{ getSortIcon("current_debt_cents") }}</span>
-                  </span>
-                </th>
-                <th
-                  scope="col"
-                  class="cursor-pointer px-6 py-3 text-left text-sm font-semibold text-gray-700 transition hover:bg-gray-100"
-                  @click="toggleSortOrder('is_active')"
-                >
-                  <span class="flex items-center gap-2">
-                    Status
-                    <span class="text-xs">{{ getSortIcon("is_active") }}</span>
-                  </span>
-                </th>
-                <th scope="col" class="px-6 py-3 text-center text-sm font-semibold text-gray-700">Ações</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-200">
-              <tr v-for="customer in customers" :key="customer.id" class="hover:bg-gray-50">
-                <td class="px-6 py-4 text-sm text-gray-900">{{ customer.name }}</td>
-                <td class="px-6 py-4 text-sm text-gray-600">
-                  {{ formatPhoneForDisplay(customer.phone) }}
-                </td>
-                <td class="px-6 py-4 text-sm text-gray-600">
-                  {{ formatCents(customer.credit_limit_cents) }}
-                </td>
-                <td class="px-6 py-4 text-sm text-gray-600">
-                  {{ formatPaymentDueDay(customer.payment_due_day) }}
-                </td>
-                <td class="px-6 py-4 text-sm text-gray-600">
-                  <div class="flex items-center gap-2">
-                    <span :class="isDebtVisible(customer.id) ? '' : 'blur-xs'">
-                      {{ formatCents(customer.current_debt_cents) }}
-                    </span>
-                    <button
-                      type="button"
-                      :aria-label="isDebtVisible(customer.id) ? 'Ocultar fiado atual' : 'Mostrar fiado atual'"
-                      class="rounded p-1.5 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
-                      @click="toggleDebtVisibility(customer.id)"
+          <!-- Table / Mobile Cards -->
+          <div v-else>
+            <div class="hidden overflow-x-auto rounded-lg border border-gray-200 bg-white md:block">
+              <table class="w-full min-w-[1200px]">
+                <caption class="sr-only">Lista de clientes cadastrados</caption>
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th
+                      scope="col"
+                      class="cursor-pointer px-6 py-3 text-left text-sm font-semibold text-gray-700 transition hover:bg-gray-100"
+                      @click="toggleSortOrder('name')"
                     >
-                      <svg
-                        v-if="isDebtVisible(customer.id)"
-                        xmlns="http://www.w3.org/2000/svg"
-                        class="h-4 w-4"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        stroke-width="2"
-                      >
-                        <path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          d="M13.875 18.825A10.05 10.05 0 0112 19c-5.523 0-10-3.582-10-8 0-1.775.723-3.414 1.943-4.747m3.174-2.516A10.058 10.058 0 0112 3c5.523 0 10 3.582 10 8 0 2.043-.957 3.906-2.56 5.363M15 12a3 3 0 10-4.243 2.83M3 3l18 18"
-                        />
-                      </svg>
-                      <svg
-                        v-else
-                        xmlns="http://www.w3.org/2000/svg"
-                        class="h-4 w-4"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        stroke-width="2"
-                      >
-                        <path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                        />
-                        <path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          d="M2.458 12C3.732 7.943 7.523 5 12 5s8.268 2.943 9.542 7c-1.274 4.057-5.065 7-9.542 7S3.732 16.057 2.458 12z"
-                        />
-                      </svg>
-                    </button>
-                    <button
-                      v-if="customer.current_debt_cents > 0"
-                      type="button"
-                      :aria-label="'Registrar pagamento de fiado para ' + customer.name"
-                      class="rounded p-1.5 text-primary transition hover:bg-gray-100"
-                      @click="openPaymentModal(customer)"
+                      <span class="flex items-center gap-2">
+                        Nome
+                        <span class="text-xs">{{ getSortIcon("name") }}</span>
+                      </span>
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Telefone</th>
+                    <th
+                      scope="col"
+                      class="cursor-pointer px-6 py-3 text-left text-sm font-semibold text-gray-700 transition hover:bg-gray-100"
+                      @click="toggleSortOrder('credit_limit_cents')"
                     >
-                      💲
-                    </button>
+                      <span class="flex items-center gap-2">
+                        Limite de Fiado
+                        <span class="text-xs">{{ getSortIcon("credit_limit_cents") }}</span>
+                      </span>
+                    </th>
+                    <th
+                      scope="col"
+                      class="cursor-pointer px-6 py-3 text-left text-sm font-semibold text-gray-700 transition hover:bg-gray-100"
+                      @click="toggleSortOrder('payment_due_day')"
+                    >
+                      <span class="flex items-center gap-2">
+                        Dia de Pagamento
+                        <span class="text-xs">{{ getSortIcon("payment_due_day") }}</span>
+                      </span>
+                    </th>
+                    <th
+                      scope="col"
+                      class="cursor-pointer px-6 py-3 text-left text-sm font-semibold text-gray-700 transition hover:bg-gray-100"
+                      @click="toggleSortOrder('current_debt_cents')"
+                    >
+                      <span class="flex items-center gap-2">
+                        Fiado Atual
+                        <span class="text-xs">{{ getSortIcon("current_debt_cents") }}</span>
+                      </span>
+                    </th>
+                    <th
+                      scope="col"
+                      class="cursor-pointer px-6 py-3 text-left text-sm font-semibold text-gray-700 transition hover:bg-gray-100"
+                      @click="toggleSortOrder('is_active')"
+                    >
+                      <span class="flex items-center gap-2">
+                        Status
+                        <span class="text-xs">{{ getSortIcon("is_active") }}</span>
+                      </span>
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-center text-sm font-semibold text-gray-700">Ações</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                  <tr v-for="customer in customers" :key="customer.id" class="hover:bg-gray-50">
+                    <td class="px-6 py-4 text-sm text-gray-900">{{ customer.name }}</td>
+                    <td class="px-6 py-4 text-sm text-gray-600">
+                      {{ formatPhoneForDisplay(customer.phone) }}
+                    </td>
+                    <td class="px-6 py-4 text-sm text-gray-600">
+                      {{ formatCents(customer.credit_limit_cents) }}
+                    </td>
+                    <td class="px-6 py-4 text-sm text-gray-600">
+                      {{ formatPaymentDueDay(customer.payment_due_day) }}
+                    </td>
+                    <td class="px-6 py-4 text-sm text-gray-600">
+                      <div class="flex items-center gap-2">
+                        <span :class="isDebtVisible(customer.id) ? '' : 'blur-xs'">
+                          {{ formatCents(customer.current_debt_cents) }}
+                        </span>
+                        <button
+                          type="button"
+                          :aria-label="isDebtVisible(customer.id) ? 'Ocultar fiado atual' : 'Mostrar fiado atual'"
+                          class="min-h-11 min-w-11 flex items-center justify-center rounded text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
+                          @click="toggleDebtVisibility(customer.id)"
+                        >
+                          <svg
+                            v-if="isDebtVisible(customer.id)"
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="h-4 w-4"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            stroke-width="2"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              d="M13.875 18.825A10.05 10.05 0 0112 19c-5.523 0-10-3.582-10-8 0-1.775.723-3.414 1.943-4.747m3.174-2.516A10.058 10.058 0 0112 3c5.523 0 10 3.582 10 8 0 2.043-.957 3.906-2.56 5.363M15 12a3 3 0 10-4.243 2.83M3 3l18 18"
+                            />
+                          </svg>
+                          <svg
+                            v-else
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="h-4 w-4"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            stroke-width="2"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                            />
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              d="M2.458 12C3.732 7.943 7.523 5 12 5s8.268 2.943 9.542 7c-1.274 4.057-5.065 7-9.542 7S3.732 16.057 2.458 12z"
+                            />
+                          </svg>
+                        </button>
+                        <button
+                          v-if="customer.current_debt_cents > 0"
+                          type="button"
+                          :aria-label="`Cobrar cliente ${customer.name} pelo WhatsApp`"
+                          class="min-h-11 inline-flex items-center gap-1 rounded px-3 text-xs font-semibold text-success transition hover:bg-gray-100"
+                          @click="openWhatsAppModal(customer)"
+                        >
+                          <span>Cobrar 💰</span>
+                        </button>
+                        <button
+                          v-if="customer.current_debt_cents > 0"
+                          type="button"
+                          :aria-label="`Registrar pagamento de fiado de ${customer.name}`"
+                          class="min-h-11 inline-flex items-center gap-1 rounded px-3 text-xs font-semibold text-primary transition hover:bg-gray-100"
+                          @click="openPaymentModal(customer)"
+                        >
+                          <span class="text-base leading-none select-none" aria-hidden="true">💲</span>
+                          <span>Quitar</span>
+                        </button>
+                      </div>
+                    </td>
+                    <td class="px-6 py-4 text-sm">
+                      <span
+                        :class="[
+                          'inline-block rounded-full px-3 py-1 text-xs font-semibold',
+                          customer.is_active
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-gray-200 text-gray-700',
+                        ]"
+                      >
+                        {{ customer.is_active ? "Ativo" : "Inativo" }}
+                      </span>
+                    </td>
+                    <td class="px-6 py-4 text-center">
+                      <button
+                        type="button"
+                        aria-label="Editar cliente"
+                        class="min-h-11 min-w-11 flex items-center justify-center rounded text-primary transition hover:bg-gray-100"
+                        @click="openEditModal(customer)"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          class="h-5 w-5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          stroke-width="2"
+                        >
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            d="M11.983 5.33a1 1 0 011.034 0l1.92 1.11a1 1 0 00.75.1l2.174-.582a1 1 0 011.149.48l1.11 1.921a1 1 0 00.609.482l2.175.583a1 1 0 01.576 1.558l-1.065 1.721a1 1 0 00-.148.77l.329 2.238a1 1 0 01-1.034 1.154l-2.255-.169a1 1 0 00-.738.26l-1.57 1.44a1 1 0 01-1.653-.412l-.879-2.086a1 1 0 00-.57-.54l-2.1-.814a1 1 0 01-.464-1.638l1.386-1.618a1 1 0 00.235-.742l-.235-2.247a1 1 0 011.234-1.074l2.23.427a1 1 0 00.767-.156l1.852-1.182z"
+                          />
+                        </svg>
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <ul class="space-y-2 md:hidden">
+              <li
+                v-for="customer in customers"
+                :key="customer.id"
+                class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+              >
+                <div class="mb-3 flex items-start justify-between gap-2">
+                  <div class="min-w-0 flex-1">
+                    <p class="truncate text-base font-semibold text-gray-900">{{ customer.name }}</p>
+                    <p v-if="customer.phone" class="mt-0.5 text-xs text-gray-400">
+                      📞 {{ formatPhoneForDisplay(customer.phone) }}
+                    </p>
                   </div>
-                </td>
-                <td class="px-6 py-4 text-sm">
                   <span
                     :class="[
-                      'inline-block rounded-full px-3 py-1 text-xs font-semibold',
+                      'shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold',
                       customer.is_active
                         ? 'bg-green-100 text-green-800'
                         : 'bg-gray-200 text-gray-700',
                     ]"
                   >
-                    {{ customer.is_active ? "Ativo" : "Inativo" }}
+                    {{ customer.is_active ? 'Ativo' : 'Inativo' }}
                   </span>
-                </td>
-                <td class="px-6 py-4 text-center">
+                </div>
+
+                <div class="mb-3 grid grid-cols-3 gap-2 text-center">
+                  <div class="rounded-lg bg-surface px-2 py-1.5">
+                    <p class="text-xs text-gray-400">Limite fiado</p>
+                    <p class="text-sm font-bold text-gray-800">
+                      {{ formatCents(customer.credit_limit_cents) }}
+                    </p>
+                  </div>
+                  <div class="rounded-lg bg-surface px-2 py-1.5">
+                    <p class="text-xs text-gray-400">Fiado atual</p>
+                    <div class="flex items-center justify-center gap-1">
+                      <p
+                        :class="[
+                          'text-sm font-bold',
+                          customer.current_debt_cents > 0 ? 'text-warning' : 'text-gray-400',
+                          isDebtVisible(customer.id) ? '' : 'blur-xs',
+                        ]"
+                      >
+                        {{ formatCents(customer.current_debt_cents) }}
+                      </p>
+                      <button
+                        type="button"
+                        :aria-label="isDebtVisible(customer.id) ? 'Ocultar fiado atual' : 'Mostrar fiado atual'"
+                        class="flex items-center justify-center rounded text-gray-400 transition hover:text-gray-600"
+                        @click="toggleDebtVisibility(customer.id)"
+                      >
+                        <svg
+                          v-if="isDebtVisible(customer.id)"
+                          xmlns="http://www.w3.org/2000/svg"
+                          class="h-3.5 w-3.5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          stroke-width="2"
+                        >
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            d="M13.875 18.825A10.05 10.05 0 0112 19c-5.523 0-10-3.582-10-8 0-1.775.723-3.414 1.943-4.747m3.174-2.516A10.058 10.058 0 0112 3c5.523 0 10 3.582 10 8 0 2.043-.957 3.906-2.56 5.363M15 12a3 3 0 10-4.243 2.83M3 3l18 18"
+                          />
+                        </svg>
+                        <svg
+                          v-else
+                          xmlns="http://www.w3.org/2000/svg"
+                          class="h-3.5 w-3.5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          stroke-width="2"
+                        >
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                          />
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            d="M2.458 12C3.732 7.943 7.523 5 12 5s8.268 2.943 9.542 7c-1.274 4.057-5.065 7-9.542 7S3.732 16.057 2.458 12z"
+                          />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="rounded-lg bg-surface px-2 py-1.5">
+                    <p class="text-xs text-gray-400">Vencimento</p>
+                    <p class="text-sm font-bold text-gray-700">
+                      {{ formatPaymentDueDay(customer.payment_due_day) }}
+                    </p>
+                  </div>
+                </div>
+
+                <div class="flex gap-2">
+                  <button
+                    v-if="customer.current_debt_cents > 0"
+                    type="button"
+                    :aria-label="`Cobrar cliente ${customer.name} pelo WhatsApp`"
+                    class="min-h-11 inline-flex flex-1 items-center justify-center rounded-lg border border-success/20 bg-success/10 text-sm font-semibold text-success transition hover:bg-success/20"
+                    @click="openWhatsAppModal(customer)"
+                  >
+                    Cobrar 💰
+                  </button>
+
+                  <button
+                    v-if="customer.current_debt_cents > 0"
+                    type="button"
+                    :aria-label="`Registrar pagamento de fiado de ${customer.name}`"
+                    class="min-h-11 inline-flex flex-1 items-center justify-center gap-1 rounded-lg border border-warning/20 bg-warning/10 text-sm font-semibold text-warning transition hover:bg-warning/20"
+                    @click="openPaymentModal(customer)"
+                  >
+                    <span class="text-base leading-none" aria-hidden="true">💲</span>
+                    Quitar
+                  </button>
+
                   <button
                     type="button"
-                    aria-label="Editar cliente"
-                    class="rounded p-2 text-primary transition hover:bg-gray-100"
+                    :aria-label="`Editar cliente ${customer.name}`"
+                    class="min-h-11 inline-flex flex-1 items-center justify-center gap-1 rounded-lg border border-gray-200 text-sm font-medium text-primary transition hover:bg-primary/5"
                     @click="openEditModal(customer)"
                   >
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
-                      class="h-5 w-5"
+                      class="h-4 w-4"
                       fill="none"
                       viewBox="0 0 24 24"
                       stroke="currentColor"
@@ -1321,12 +1684,12 @@ async function submitPaymentForm(): Promise<void> {
                         d="M11.983 5.33a1 1 0 011.034 0l1.92 1.11a1 1 0 00.75.1l2.174-.582a1 1 0 011.149.48l1.11 1.921a1 1 0 00.609.482l2.175.583a1 1 0 01.576 1.558l-1.065 1.721a1 1 0 00-.148.77l.329 2.238a1 1 0 01-1.034 1.154l-2.255-.169a1 1 0 00-.738.26l-1.57 1.44a1 1 0 01-1.653-.412l-.879-2.086a1 1 0 00-.57-.54l-2.1-.814a1 1 0 01-.464-1.638l1.386-1.618a1 1 0 00.235-.742l-.235-2.247a1 1 0 011.234-1.074l2.23.427a1 1 0 00.767-.156l1.852-1.182z"
                       />
                     </svg>
+                    Editar
                   </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+                </div>
+              </li>
+            </ul>
+          </div>
 
         <!-- Pagination Controls -->
         <div
@@ -1382,15 +1745,15 @@ async function submitPaymentForm(): Promise<void> {
 
         <!-- ==================== ABA: Histórico de Compras ==================== -->
         <section v-if="activeTab === 'purchase-history'" class="mt-6">
-          <div class="mb-6 flex flex-wrap items-end gap-4">
-            <div class="relative w-full max-w-md">
-              <label class="mb-1 block text-sm font-medium text-gray-700">Selecione o cliente</label>
+          <div class="mb-4 flex flex-col gap-2 sm:mb-6 sm:flex-row sm:flex-wrap sm:items-end sm:gap-4">
+            <div class="relative min-w-0 flex-1 sm:max-w-md">
+              <label class="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500">Cliente</label>
               <div class="flex gap-2">
                 <input
                   v-model="historyCustomerSearchInput"
                   type="text"
                   placeholder="Buscar por nome ou telefone..."
-                  class="flex-1 rounded border border-gray-300 px-4 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="flex-1 rounded-lg border border-gray-300 px-4 py-2 text-base focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 md:text-sm"
                   @focus="openHistoryCustomerDropdown"
                   @input="openHistoryCustomerDropdown"
                 />
@@ -1399,7 +1762,7 @@ async function submitPaymentForm(): Promise<void> {
                   type="button"
                   aria-label="Limpar cliente selecionado no historico de compras"
                   @click="clearSelectedHistoryCustomer"
-                  class="rounded bg-gray-200 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-300"
+                  class="min-h-11 rounded-lg bg-gray-200 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-300"
                 >
                   ✕
                 </button>
@@ -1443,12 +1806,12 @@ async function submitPaymentForm(): Promise<void> {
               </div>
             </div>
 
-            <div class="flex items-end gap-3">
+            <div class="grid grid-cols-2 gap-2 sm:flex sm:items-end sm:gap-3">
               <div>
-                <label class="mb-1 block text-sm font-medium text-gray-700">Mês</label>
+                <label class="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500">Mês</label>
                 <select
                   v-model.number="selectedHistoryMonth"
-                  class="rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded-lg border border-gray-300 px-3 py-2 text-base focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 md:text-sm"
                 >
                   <option v-for="month in monthOptions" :key="month.value" :value="month.value">
                     {{ month.label }}
@@ -1457,10 +1820,10 @@ async function submitPaymentForm(): Promise<void> {
               </div>
 
               <div>
-                <label class="mb-1 block text-sm font-medium text-gray-700">Ano</label>
+                <label class="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500">Ano</label>
                 <select
                   v-model.number="selectedHistoryYear"
-                  class="rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded-lg border border-gray-300 px-3 py-2 text-base focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 md:text-sm"
                 >
                   <option v-for="year in yearOptions" :key="year" :value="year">
                     {{ year }}
@@ -1479,6 +1842,27 @@ async function submitPaymentForm(): Promise<void> {
 
           <div v-else class="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
             <div>
+              <div v-if="!loadingFiadoHistory" class="mb-4 grid grid-cols-3 gap-2 xl:hidden">
+                <div class="rounded-lg bg-surface p-3 text-center">
+                  <p class="text-xs text-gray-400">Fiado do período</p>
+                  <p class="text-sm font-bold text-gray-800">
+                    {{ formatCents(fiadoHistorySummary.fiado_period_cents) }}
+                  </p>
+                </div>
+                <div class="rounded-lg bg-surface p-3 text-center">
+                  <p class="text-xs text-gray-400">Em aberto</p>
+                  <p class="text-sm font-bold text-warning">
+                    {{ formatCents(fiadoHistorySummary.fiado_open_cents) }}
+                  </p>
+                </div>
+                <div class="rounded-lg bg-surface p-3 text-center">
+                  <p class="text-xs text-gray-400">Pago no período</p>
+                  <p class="text-sm font-bold text-success">
+                    {{ formatCents(fiadoHistorySummary.fiado_paid_cents) }}
+                  </p>
+                </div>
+              </div>
+
               <div v-if="loadingFiadoHistory" class="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
                 <div v-for="index in 6" :key="index" class="h-10 animate-pulse rounded bg-gray-100"></div>
               </div>
@@ -1506,7 +1890,7 @@ async function submitPaymentForm(): Promise<void> {
               </div>
 
               <template v-else>
-                <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+                <div class="hidden overflow-x-auto rounded-lg border border-gray-200 bg-white md:block">
                   <table class="w-full min-w-[720px]">
                     <caption class="sr-only">Histórico de compras em fiado do cliente selecionado</caption>
                     <thead class="bg-gray-50">
@@ -1541,36 +1925,79 @@ async function submitPaymentForm(): Promise<void> {
                   </table>
                 </div>
 
+                <ul class="space-y-2 md:hidden">
+                  <li
+                    v-for="sale in fiadoHistoryRows"
+                    :key="sale.id"
+                    class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+                  >
+                    <div class="mb-3 flex items-start justify-between">
+                      <div>
+                        <p class="text-sm font-semibold text-gray-800">
+                          {{ formatDateDay(sale.created_at) }}
+                        </p>
+                        <p class="text-xs text-gray-400">{{ formatTime(sale.created_at) }}</p>
+                      </div>
+                      <div class="text-right">
+                        <p class="text-sm font-bold text-warning">
+                          {{ formatCents(getFiadoAmountCents(sale)) }}
+                        </p>
+                        <p class="text-xs text-gray-400">{{ getPaymentTypeLabel(sale) }}</p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      class="min-h-11 w-full rounded-lg border border-gray-200 text-sm font-medium text-primary transition hover:bg-primary/5"
+                      :aria-label="`Ver comprovante de ${formatDateDay(sale.created_at)}`"
+                      @click="openReceiptModal(sale)"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        class="mr-1 inline h-4 w-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        aria-hidden="true"
+                      >
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      Ver comprovante
+                    </button>
+                  </li>
+                </ul>
+
                 <div
                   v-if="fiadoHistoryTotalPages > 1"
-                  class="mt-6 flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4"
+                  class="mt-4 flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between"
                 >
-                  <div class="text-sm text-gray-600">
+                  <p class="text-center text-sm text-gray-600 sm:text-left">
                     Mostrando
                     <span class="font-semibold">{{ (fiadoHistoryPage - 1) * fiadoHistoryPerPage + 1 }}</span>
                     –
                     <span class="font-semibold">{{ Math.min(fiadoHistoryPage * fiadoHistoryPerPage, fiadoHistoryTotal) }}</span>
                     de <span class="font-semibold">{{ fiadoHistoryTotal }}</span> registros
-                  </div>
+                  </p>
 
-                  <div class="flex items-center gap-2">
+                  <div class="flex items-center justify-center gap-2">
                     <button
                       type="button"
                       :disabled="fiadoHistoryPage === 1"
                       @click="goToPreviousFiadoHistoryPage"
-                      class="rounded border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+                      class="min-h-11 rounded-lg border border-gray-300 px-4 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:opacity-40"
                     >
                       ← Anterior
                     </button>
 
-                    <div class="flex gap-1">
+                    <div class="hidden gap-1 sm:flex">
                       <button
                         v-for="page in fiadoHistoryPagesArray"
                         :key="page"
                         type="button"
                         @click="goToFiadoHistoryPage(page)"
                         :class="[
-                          'rounded px-2 py-1 text-sm font-medium transition',
+                          'min-h-11 min-w-11 rounded-lg text-sm font-medium transition',
                           page === fiadoHistoryPage
                             ? 'bg-primary text-white'
                             : 'border border-gray-300 text-gray-700 hover:bg-gray-50',
@@ -1580,11 +2007,15 @@ async function submitPaymentForm(): Promise<void> {
                       </button>
                     </div>
 
+                    <span class="px-2 text-sm text-gray-500 sm:hidden">
+                      {{ fiadoHistoryPage }} / {{ fiadoHistoryTotalPages }}
+                    </span>
+
                     <button
                       type="button"
                       :disabled="fiadoHistoryPage === fiadoHistoryTotalPages"
                       @click="goToNextFiadoHistoryPage"
-                      class="rounded border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+                      class="min-h-11 rounded-lg border border-gray-300 px-4 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:opacity-40"
                     >
                       Próxima →
                     </button>
@@ -1593,7 +2024,7 @@ async function submitPaymentForm(): Promise<void> {
               </template>
             </div>
 
-            <aside class="h-fit rounded-lg border border-gray-200 bg-white p-4 xl:sticky xl:top-24">
+            <aside class="hidden h-fit rounded-lg border border-gray-200 bg-white p-4 xl:sticky xl:top-24 xl:block">
               <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-500">
                 Resumo do Período
               </h3>
@@ -1698,7 +2129,7 @@ async function submitPaymentForm(): Promise<void> {
                 <label class="mb-1 block text-sm font-medium text-gray-700">Mês</label>
                 <select
                   v-model.number="selectedHistoryMonth"
-                  class="rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                 >
                   <option v-for="month in monthOptions" :key="month.value" :value="month.value">
                     {{ month.label }}
@@ -1710,7 +2141,7 @@ async function submitPaymentForm(): Promise<void> {
                 <label class="mb-1 block text-sm font-medium text-gray-700">Ano</label>
                 <select
                   v-model.number="selectedHistoryYear"
-                  class="rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                 >
                   <option v-for="year in yearOptions" :key="year" :value="year">
                     {{ year }}
@@ -1756,7 +2187,7 @@ async function submitPaymentForm(): Promise<void> {
               </div>
 
               <template v-else>
-                <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+                <div class="hidden overflow-x-auto rounded-lg border border-gray-200 bg-white md:block">
                   <table class="w-full min-w-[760px]">
                     <caption class="sr-only">Histórico de pagamentos de fiado do cliente selecionado</caption>
                     <thead class="bg-gray-50">
@@ -1784,36 +2215,68 @@ async function submitPaymentForm(): Promise<void> {
                   </table>
                 </div>
 
+                <ul class="space-y-2 md:hidden">
+                  <li
+                    v-for="payment in paymentHistoryRows"
+                    :key="payment.id"
+                    class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+                  >
+                    <div class="mb-3 flex items-start justify-between">
+                      <div>
+                        <p class="text-sm font-semibold text-gray-800">{{ formatDateDay(payment.created_at) }}</p>
+                        <p class="text-xs text-gray-400">{{ formatTime(payment.created_at) }}</p>
+                      </div>
+                      <div class="text-right">
+                        <p class="text-xs text-gray-400">Valor pago</p>
+                        <p class="text-sm font-bold text-success">{{ formatCents(payment.amount_cents) }}</p>
+                      </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2">
+                      <div class="rounded-lg bg-surface px-2 py-1.5 text-center">
+                        <p class="text-xs text-gray-400">Fiado em aberto</p>
+                        <p class="text-sm font-bold text-warning">
+                          {{ formatCents(getPaymentHistoryDebtBeforeCents(payment)) }}
+                        </p>
+                      </div>
+                      <div class="rounded-lg bg-surface px-2 py-1.5 text-center">
+                        <p class="text-xs text-gray-400">Tipo de pagamento</p>
+                        <p class="text-sm font-bold text-gray-700">{{ getPaymentHistoryTypeLabel(payment) }}</p>
+                      </div>
+                    </div>
+                  </li>
+                </ul>
+
                 <div
                   v-if="paymentHistoryTotalPages > 1"
-                  class="mt-6 flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4"
+                  class="mt-4 flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between"
                 >
-                  <div class="text-sm text-gray-600">
+                  <p class="text-center text-sm text-gray-600 sm:text-left">
                     Mostrando
                     <span class="font-semibold">{{ (paymentHistoryPage - 1) * paymentHistoryPerPage + 1 }}</span>
                     –
                     <span class="font-semibold">{{ Math.min(paymentHistoryPage * paymentHistoryPerPage, paymentHistoryTotal) }}</span>
                     de <span class="font-semibold">{{ paymentHistoryTotal }}</span> registros
-                  </div>
+                  </p>
 
-                  <div class="flex items-center gap-2">
+                  <div class="flex items-center justify-center gap-2">
                     <button
                       type="button"
                       :disabled="paymentHistoryPage === 1"
                       @click="goToPreviousPaymentHistoryPage"
-                      class="rounded border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+                      class="min-h-11 rounded-lg border border-gray-300 px-4 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:opacity-40"
                     >
                       ← Anterior
                     </button>
 
-                    <div class="flex gap-1">
+                    <div class="hidden gap-1 sm:flex">
                       <button
                         v-for="page in paymentHistoryPagesArray"
                         :key="page"
                         type="button"
                         @click="goToPaymentHistoryPage(page)"
                         :class="[
-                          'rounded px-2 py-1 text-sm font-medium transition',
+                          'min-h-11 min-w-11 rounded-lg text-sm font-medium transition',
                           page === paymentHistoryPage
                             ? 'bg-primary text-white'
                             : 'border border-gray-300 text-gray-700 hover:bg-gray-50',
@@ -1823,11 +2286,15 @@ async function submitPaymentForm(): Promise<void> {
                       </button>
                     </div>
 
+                    <span class="px-2 text-sm text-gray-500 sm:hidden">
+                      {{ paymentHistoryPage }} / {{ paymentHistoryTotalPages }}
+                    </span>
+
                     <button
                       type="button"
                       :disabled="paymentHistoryPage === paymentHistoryTotalPages"
                       @click="goToNextPaymentHistoryPage"
-                      class="rounded border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+                      class="min-h-11 rounded-lg border border-gray-300 px-4 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:opacity-40"
                     >
                       Próxima →
                     </button>
@@ -1870,18 +2337,20 @@ async function submitPaymentForm(): Promise<void> {
         <!-- Receipt Modal -->
         <div
           v-if="showReceiptModal && selectedReceiptSale"
-          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+          class="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="customer-receipt-modal-title"
-          @click.self="closeReceiptModal"
         >
-          <div class="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+          <div class="absolute inset-0 bg-black/50" @click="closeReceiptModal"></div>
+          <div class="relative w-full max-h-[92vh] overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:mx-auto sm:max-w-md sm:rounded-2xl">
+            <div class="mx-auto mt-3 h-1 w-12 rounded-full bg-gray-200 sm:hidden"></div>
+            <div class="p-4 sm:p-6">
             <div class="mb-4 flex items-center justify-between">
               <h2 id="customer-receipt-modal-title" class="text-xl font-bold text-gray-900">Comprovante de Compra</h2>
               <button
                 type="button"
-                class="rounded-lg p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600"
+                class="rounded-lg p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-600"
                 aria-label="Fechar modal"
                 @click="closeReceiptModal"
               >
@@ -1977,18 +2446,143 @@ async function submitPaymentForm(): Promise<void> {
             <div class="mt-4 flex justify-end gap-3">
               <button
                 type="button"
-                class="rounded border border-gray-300 px-4 py-2 font-medium text-gray-700 transition hover:bg-gray-50"
+                class="min-h-11 rounded border border-gray-300 px-4 py-2 font-medium text-gray-700 transition hover:bg-gray-50"
                 @click="closeReceiptModal"
               >
                 Fechar
               </button>
               <button
                 type="button"
-                class="rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark"
+                class="min-h-11 rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark"
                 @click="printReceipt"
               >
                 Imprimir
               </button>
+            </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- WhatsApp Charge Modal -->
+        <div
+          v-if="showWhatsAppModal && selectedWhatsAppCustomer"
+          class="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="customer-whatsapp-modal-title"
+        >
+          <div class="absolute inset-0 bg-black/50" @click="closeWhatsAppModal"></div>
+          <div class="relative w-full max-h-[92vh] overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:mx-auto sm:max-w-md sm:rounded-2xl">
+            <div class="mx-auto mt-3 h-1 w-12 rounded-full bg-gray-200 sm:hidden"></div>
+            <div class="p-4 sm:p-6">
+              <div class="mb-4 flex items-center justify-between">
+                <h2 id="customer-whatsapp-modal-title" class="text-xl font-bold text-gray-900">Cobrança via WhatsApp</h2>
+                <button
+                  type="button"
+                  class="rounded-lg p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-600"
+                  aria-label="Fechar modal"
+                  @click="closeWhatsAppModal"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-6 w-6"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div class="mb-4 space-y-2 rounded bg-gray-50 p-3">
+                <div class="text-sm font-medium text-gray-700">{{ selectedWhatsAppCustomer.name }}</div>
+                <div class="text-sm text-gray-600">
+                  Telefone:
+                  <span class="font-semibold text-gray-900">
+                    {{ selectedWhatsAppCustomer.phone ? formatPhoneForDisplay(selectedWhatsAppCustomer.phone) : "Não informado" }}
+                  </span>
+                </div>
+                <div class="text-sm text-gray-600">
+                  Dívida total:
+                  <span class="font-semibold text-gray-900">
+                    {{ formatCents(selectedWhatsAppCustomer.current_debt_cents) }}
+                  </span>
+                </div>
+                <div class="text-sm text-gray-600">
+                  Vencimento:
+                  <span class="font-semibold text-gray-900">
+                    {{ formatPaymentDueDay(selectedWhatsAppCustomer.payment_due_day) }}
+                  </span>
+                </div>
+              </div>
+
+              <div
+                v-if="whatsAppFormErrors.submit"
+                class="mb-4 rounded bg-red-100 p-3 text-sm text-danger"
+                role="alert"
+              >
+                {{ whatsAppFormErrors.submit }}
+              </div>
+
+              <form class="space-y-4" novalidate @submit.prevent="submitWhatsAppForm">
+                <fieldset>
+                  <legend class="mb-2 block text-sm font-medium text-gray-700">Tipo de cobrança</legend>
+                  <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <label class="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border border-gray-300 px-3 py-2 transition hover:border-success/40">
+                      <input v-model="whatsAppFormData.charge_type" type="radio" value="full" class="h-4 w-4 border-gray-300 text-success focus:ring-success/30" />
+                      <span class="text-sm font-medium text-gray-700">Completa</span>
+                    </label>
+                    <label class="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border border-gray-300 px-3 py-2 transition hover:border-success/40">
+                      <input v-model="whatsAppFormData.charge_type" type="radio" value="partial" class="h-4 w-4 border-gray-300 text-success focus:ring-success/30" />
+                      <span class="text-sm font-medium text-gray-700">Parcial</span>
+                    </label>
+                  </div>
+                </fieldset>
+
+                <div v-if="whatsAppFormData.charge_type === 'partial'">
+                  <label for="whatsapp_charge_amount" class="mb-1 block text-sm font-medium text-gray-700">
+                    Valor da Cobrança *
+                  </label>
+                  <input
+                    id="whatsapp_charge_amount"
+                    :value="whatsAppFormData.amount_input"
+                    type="text"
+                    autofocus
+                    inputmode="numeric"
+                    placeholder="R$ 0,00"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    @input="handleWhatsAppAmountInput"
+                  />
+                  <div v-if="whatsAppFormErrors.amount_cents" class="mt-1 text-xs text-danger">
+                    {{ whatsAppFormErrors.amount_cents[0] }}
+                  </div>
+                </div>
+
+                <div class="rounded-lg border border-green-100 bg-green-50 px-3 py-2 text-sm text-green-900">
+                  <span class="font-medium">Prévia:</span>
+                  {{ whatsAppFormData.charge_type === "full"
+                    ? ` cobrança do valor total de ${formatCents(selectedWhatsAppCustomer.current_debt_cents)}.`
+                    : ` cobrança parcial de ${whatsAppFormData.amount_input || "R$ 0,00"}, com dívida total de ${formatCents(selectedWhatsAppCustomer.current_debt_cents)}.` }}
+                </div>
+
+                <div class="flex justify-end gap-3 pt-4">
+                  <button
+                    type="button"
+                    class="min-h-11 rounded border border-gray-300 px-4 py-2 font-medium text-gray-700 transition hover:bg-gray-50"
+                    @click="closeWhatsAppModal"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    class="min-h-11 rounded bg-success px-4 py-2 font-medium text-white transition hover:bg-green-600"
+                  >
+                    Enviar
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         </div>
@@ -1996,18 +2590,20 @@ async function submitPaymentForm(): Promise<void> {
         <!-- Payment Modal -->
         <div
           v-if="showPaymentModal && selectedPaymentCustomer"
-          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+          class="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="customer-payment-modal-title"
-          @click.self="closePaymentModal"
         >
-          <div class="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+          <div class="absolute inset-0 bg-black/50" @click="closePaymentModal"></div>
+          <div class="relative w-full max-h-[92vh] overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:mx-auto sm:max-w-md sm:rounded-2xl">
+            <div class="mx-auto mt-3 h-1 w-12 rounded-full bg-gray-200 sm:hidden"></div>
+            <div class="p-4 sm:p-6">
             <div class="mb-4 flex items-center justify-between">
               <h2 id="customer-payment-modal-title" class="text-xl font-bold text-gray-900">Registrar Pagamento de Fiado</h2>
               <button
                 type="button"
-                class="rounded-lg p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600"
+                class="rounded-lg p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-600"
                 aria-label="Fechar modal"
                 @click="closePaymentModal"
               >
@@ -2054,7 +2650,7 @@ async function submitPaymentForm(): Promise<void> {
                   autofocus
                   inputmode="numeric"
                   placeholder="R$ 0,00"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   @input="handlePaymentAmountInput"
                 />
                 <div v-if="paymentFormErrors.amount_cents" class="mt-1 text-xs text-danger">
@@ -2073,7 +2669,7 @@ async function submitPaymentForm(): Promise<void> {
                   inputmode="numeric"
                   maxlength="6"
                   placeholder="••••••"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   @input="handlePaymentPinInput"
                 />
                 <div v-if="paymentFormErrors.pin" class="mt-1 text-xs text-danger">
@@ -2084,7 +2680,7 @@ async function submitPaymentForm(): Promise<void> {
               <div class="flex justify-end gap-3 pt-4">
                 <button
                   type="button"
-                  class="rounded border border-gray-300 px-4 py-2 font-medium text-gray-700 transition hover:bg-gray-50"
+                  class="min-h-11 rounded border border-gray-300 px-4 py-2 font-medium text-gray-700 transition hover:bg-gray-50"
                   @click="closePaymentModal"
                 >
                   Cancelar
@@ -2092,7 +2688,7 @@ async function submitPaymentForm(): Promise<void> {
                 <button
                   type="submit"
                   :disabled="paymentLoading"
-                  class="flex items-center gap-2 rounded bg-success px-4 py-2 font-medium text-white transition hover:bg-green-600 disabled:cursor-not-allowed disabled:opacity-50"
+                  class="min-h-11 flex items-center gap-2 rounded bg-success px-4 py-2 font-medium text-white transition hover:bg-green-600 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <svg
                     v-if="paymentLoading"
@@ -2119,26 +2715,29 @@ async function submitPaymentForm(): Promise<void> {
                 </button>
               </div>
             </form>
+            </div>
           </div>
         </div>
 
         <!-- Create/Edit Modal -->
         <div
           v-if="showModal"
-          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+          class="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="customer-form-modal-title"
-          @click.self="closeModal"
         >
-          <div class="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+          <div class="absolute inset-0 bg-black/50" @click="closeModal"></div>
+          <div class="relative w-full max-h-[92vh] overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:mx-auto sm:max-w-md sm:rounded-2xl">
+            <div class="mx-auto mt-3 h-1 w-12 rounded-full bg-gray-200 sm:hidden"></div>
+            <div class="p-4 sm:p-6">
             <div class="mb-4 flex items-center justify-between">
               <h2 id="customer-form-modal-title" class="text-xl font-bold text-gray-900">
                 {{ isEditMode ? "Editar Cliente" : "Novo Cliente" }}
               </h2>
               <button
                 type="button"
-                class="rounded-lg p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600"
+                class="rounded-lg p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-600"
                 aria-label="Fechar modal"
                 @click="closeModal"
               >
@@ -2172,7 +2771,7 @@ async function submitPaymentForm(): Promise<void> {
                   type="text"
                   autofocus
                   maxlength="100"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                 />
                 <div v-if="formErrors.name" class="mt-1 text-xs text-danger">{{ formErrors.name[0] }}</div>
               </div>
@@ -2185,7 +2784,7 @@ async function submitPaymentForm(): Promise<void> {
                   type="text"
                   inputmode="numeric"
                   placeholder="(81) 9 1234-5678"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   @input="handlePhoneInput"
                 />
                 <div v-if="formErrors.phone" class="mt-1 text-xs text-danger">{{ formErrors.phone[0] }}</div>
@@ -2201,7 +2800,7 @@ async function submitPaymentForm(): Promise<void> {
                   type="text"
                   inputmode="numeric"
                   placeholder="R$ 0,00"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   @input="handleCreditLimitInput"
                 />
                 <div v-if="formErrors.credit_limit_cents" class="mt-1 text-xs text-danger">
@@ -2220,7 +2819,7 @@ async function submitPaymentForm(): Promise<void> {
                   maxlength="2"
                   inputmode="numeric"
                   placeholder="Ex.: 5"
-                  class="w-full rounded border border-gray-300 px-3 py-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   @input="handlePaymentDueDayInput"
                 />
                 <p class="mt-1 text-xs text-gray-500">
@@ -2248,7 +2847,7 @@ async function submitPaymentForm(): Promise<void> {
               <div class="flex justify-end gap-3 pt-4">
                 <button
                   type="button"
-                  class="rounded border border-gray-300 px-4 py-2 font-medium text-gray-700 transition hover:bg-gray-50"
+                  class="min-h-11 rounded border border-gray-300 px-4 py-2 font-medium text-gray-700 transition hover:bg-gray-50"
                   @click="closeModal"
                 >
                   Cancelar
@@ -2256,7 +2855,7 @@ async function submitPaymentForm(): Promise<void> {
                 <button
                   type="submit"
                   :disabled="loadingSubmit"
-                  class="flex items-center gap-2 rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
+                  class="min-h-11 flex items-center gap-2 rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <svg
                     v-if="loadingSubmit"
@@ -2283,6 +2882,7 @@ async function submitPaymentForm(): Promise<void> {
                 </button>
               </div>
             </form>
+            </div>
           </div>
         </div>
 

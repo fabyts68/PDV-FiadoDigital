@@ -26,6 +26,8 @@ const ALERT_CASH_REGISTER_AMOUNT_SETTING = "cash_register_alert_amount_cents";
 const ALERT_REFUND_LIMIT_SETTING = "refund_alert_limit_cents";
 const FIADO_ALERT_AT_90_PERCENT_SETTING = "fiado_alert_at_90_percent";
 const FIADO_ALERT_ON_DUE_DAY_SETTING = "fiado_alert_on_due_day";
+const WHATSAPP_MESSAGE_FIADO_VENCIDO_SETTING = "whatsapp_message_fiado_vencido";
+const WHATSAPP_MESSAGE_FIADO_A_VENCER_SETTING = "whatsapp_message_fiado_a_vencer";
 
 export class SettingsService {
   private settingsRepository: SettingsRepository;
@@ -120,6 +122,8 @@ export class SettingsService {
     refund_alert_limit_cents: number;
     fiado_alert_at_90_percent: boolean;
     fiado_alert_on_due_day: boolean;
+    whatsapp_message_fiado_vencido: string;
+    whatsapp_message_fiado_a_vencer: string;
     stock_alert_type_settings: Record<string, number>;
   }> {
     const keys = [
@@ -140,6 +144,8 @@ export class SettingsService {
       ALERT_REFUND_LIMIT_SETTING,
       FIADO_ALERT_AT_90_PERCENT_SETTING,
       FIADO_ALERT_ON_DUE_DAY_SETTING,
+      WHATSAPP_MESSAGE_FIADO_VENCIDO_SETTING,
+      WHATSAPP_MESSAGE_FIADO_A_VENCER_SETTING,
     ];
 
     const [settings, stockAlertTypeSettings] = await Promise.all([
@@ -178,6 +184,8 @@ export class SettingsService {
       refund_alert_limit_cents: Number.parseInt(map.get(ALERT_REFUND_LIMIT_SETTING) ?? "50000", 10) || 50000,
       fiado_alert_at_90_percent: map.get(FIADO_ALERT_AT_90_PERCENT_SETTING) !== "false",
       fiado_alert_on_due_day: map.get(FIADO_ALERT_ON_DUE_DAY_SETTING) !== "false",
+      whatsapp_message_fiado_vencido: map.get(WHATSAPP_MESSAGE_FIADO_VENCIDO_SETTING) ?? "",
+      whatsapp_message_fiado_a_vencer: map.get(WHATSAPP_MESSAGE_FIADO_A_VENCER_SETTING) ?? "",
       stock_alert_type_settings: stockAlertTypeMap,
     };
   }
@@ -200,6 +208,8 @@ export class SettingsService {
     refund_alert_limit_cents?: number;
     fiado_alert_at_90_percent?: boolean;
     fiado_alert_on_due_day?: boolean;
+    whatsapp_message_fiado_vencido?: string;
+    whatsapp_message_fiado_a_vencer?: string;
     stock_alert_type_settings?: Record<string, number>;
   }) {
     const operations: Promise<unknown>[] = [];
@@ -301,6 +311,24 @@ export class SettingsService {
     if (data.fiado_alert_on_due_day !== undefined) {
       operations.push(
         this.settingsRepository.upsert(FIADO_ALERT_ON_DUE_DAY_SETTING, String(data.fiado_alert_on_due_day)),
+      );
+    }
+
+    if (data.whatsapp_message_fiado_vencido !== undefined) {
+      operations.push(
+        this.settingsRepository.upsert(
+          WHATSAPP_MESSAGE_FIADO_VENCIDO_SETTING,
+          data.whatsapp_message_fiado_vencido,
+        ),
+      );
+    }
+
+    if (data.whatsapp_message_fiado_a_vencer !== undefined) {
+      operations.push(
+        this.settingsRepository.upsert(
+          WHATSAPP_MESSAGE_FIADO_A_VENCER_SETTING,
+          data.whatsapp_message_fiado_a_vencer,
+        ),
       );
     }
 
