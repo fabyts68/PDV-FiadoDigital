@@ -8,7 +8,7 @@ import {
   type PaymentMethod,
   type Product,
 } from "@pdv/shared";
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch, reactive, toRef } from "vue";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import { NotFoundException } from "@zxing/library";
 import QRCode from "qrcode";
@@ -71,14 +71,10 @@ const isCheckingCashRegister = ref(true);
 const openCashRegister = ref<CashRegister | null>(null);
 const cashRegisterError = ref<string | null>(null);
 
-const showOpenCashModal = ref(false);
 const openingBalanceInput = ref("");
 const openingCashError = ref<string | null>(null);
 const openingCashLoading = ref(false);
 
-const customerSearchInput = ref("");
-const selectedCustomer = ref<Customer | null>(null);
-const customerSearchMessage = ref<string | null>(null);
 const showCustomerDebt = ref(false);
 const showCustomerListModal = ref(false);
 const allCustomers = ref<Customer[]>([]);
@@ -86,11 +82,18 @@ const loadingCustomers = ref(false);
 const customerListError = ref<string | null>(null);
 const customerListFilterInput = ref("");
 
+const customerState = reactive({
+  selected: null as Customer | null,
+  searchInput: "",
+  message: null as string | null,
+  isLoading: false,
+  searchResults: [] as Customer[]
+});
+
 const productEntryInput = ref("");
 const productInputRef = ref<HTMLInputElement | null>(null);
 const productMessage = ref<string | null>(null);
 const productLoading = ref(false);
-const showCameraScanner = ref(false);
 const cameraVideoRef = ref<HTMLVideoElement | null>(null);
 const cameraError = ref<string | null>(null);
 const isScanning = ref(false);
@@ -106,23 +109,18 @@ const changeDiscountInput = ref("");
 const changeDiscountError = ref<string | null>(null);
 const changeDiscountInputRef = ref<HTMLInputElement | null>(null);
 
-const showManagerPinModal = ref(false);
 const managerPin = ref("");
 const managerPinError = ref<string | null>(null);
 const managerPinLoading = ref(false);
 const pendingManagerPinAction = ref<PendingManagerPin | null>(null);
 
-const showWeightModal = ref(false);
 const weightedProduct = ref<Product | null>(null);
 const rawWeight = ref(0);
 const weightedInputRef = ref<HTMLInputElement | null>(null);
 const weightedModalError = ref<string | null>(null);
 
-const showProductSearchModal = ref(false);
 const productSearchInput = ref("");
 const productSearchInputRef = ref<HTMLInputElement | null>(null);
-const showHelpModal = ref(false);
-const showQuantityModal = ref(false);
 const lastAddedProduct = ref<any>(null);
 const newQuantityInput = ref<number | "">("");
 const lastAddedProductError = ref<string | null>(null);
@@ -131,7 +129,6 @@ const loadingAllProducts = ref(false);
 const productSearchError = ref<string | null>(null);
 let productSearchDebounceTimeout: ReturnType<typeof setTimeout> | null = null;
 
-const showPaymentModal = ref(false);
 const paymentRows = ref<PaymentEntry[]>([{ method: PAYMENT_METHODS.CASH, amountInput: "" }]);
 const cashReceivedInput = ref("");
 const cardMachines = ref<CardMachine[]>([]);
@@ -160,8 +157,6 @@ const pixStatusLabel = ref<string>("Aguardando confirmação do Pix...");
 let pixQRCodeCountdownInterval: ReturnType<typeof setInterval> | null = null;
 let pixStatusPollingInterval: ReturnType<typeof setInterval> | null = null;
 
-const showCashOutModal = ref(false);
-const showCashInModal = ref(false);
 const movementAmountInput = ref("");
 const movementDescription = ref("");
 const movementLoading = ref(false);
@@ -179,19 +174,33 @@ let clockInterval: ReturnType<typeof setInterval> | null = null;
 let scannerBuffer = "";
 let scannerTimer: ReturnType<typeof setTimeout> | null = null;
 
+const uiState = reactive({
+  helpModal: false,
+  paymentModal: false,
+  pixPaymentModal: false,
+  managerPinModal: false,
+  openCashModal: false,
+  cashInModal: false,
+  cashOutModal: false,
+  weightModal: false,
+  productSearchModal: false,
+  cameraScanner: false,
+  quantityModal: false,
+});
+
 const hasModalOpen = computed(
   () =>
-    showOpenCashModal.value ||
-    showManagerPinModal.value ||
-    showWeightModal.value ||
-    showProductSearchModal.value ||
-    showPaymentModal.value ||
+    uiState.openCashModal ||
+    uiState.managerPinModal ||
+    uiState.weightModal ||
+    uiState.productSearchModal ||
+    uiState.paymentModal ||
     showPixQRCodeModal.value ||
     showPixManualConfirmModal.value ||
-    showCashOutModal.value ||
-    showCashInModal.value ||
+    uiState.cashOutModal ||
+    uiState.cashInModal ||
     showCustomerListModal.value ||
-    showCameraScanner.value,
+    uiState.cameraScanner,
 );
 
 const subtotalCents = computed(() => saleStore.subtotalCents);
@@ -317,21 +326,21 @@ const weightedOverStockMessage = computed(() => {
 });
 
 const customerCanUseFiado = computed(() => {
-  if (!selectedCustomer.value) {
+  if (!customerState.selected) {
     return false;
   }
 
-  if (!selectedCustomer.value.is_active) {
+  if (!customerState.selected.is_active) {
     return false;
   }
 
-  if (selectedCustomer.value.credit_blocked) {
+  if (customerState.selected.credit_blocked) {
     return false;
   }
 
   return validateFiadoCredit(
-    selectedCustomer.value.credit_limit_cents,
-    selectedCustomer.value.current_debt_cents,
+    customerState.selected.credit_limit_cents,
+    customerState.selected.current_debt_cents,
     1,
   ).valid;
 });
@@ -355,11 +364,11 @@ const customerListResults = computed(() => {
 });
 
 const hasInactiveSelectedCustomer = computed(() => {
-  if (!selectedCustomer.value) {
+  if (!customerState.selected) {
     return false;
   }
 
-  return !selectedCustomer.value.is_active;
+  return !customerState.selected.is_active;
 });
 
 const hasFiadoSelectedInPayment = computed(() => {
@@ -379,13 +388,13 @@ const fiadoInactiveCustomerError = computed(() => {
 });
 
 const availableCreditCents = computed(() => {
-  if (!selectedCustomer.value) {
+  if (!customerState.selected) {
     return 0;
   }
 
   return validateFiadoCredit(
-    selectedCustomer.value.credit_limit_cents,
-    selectedCustomer.value.current_debt_cents,
+    customerState.selected.credit_limit_cents,
+    customerState.selected.current_debt_cents,
     0,
   ).availableCents;
 });
@@ -400,13 +409,13 @@ const hasFiadoInsufficientCredit = computed(() => {
     return false;
   }
 
-  if (!selectedCustomer.value) {
+  if (!customerState.selected) {
     return false;
   }
 
   return !validateFiadoCredit(
-    selectedCustomer.value.credit_limit_cents,
-    selectedCustomer.value.current_debt_cents,
+    customerState.selected.credit_limit_cents,
+    customerState.selected.current_debt_cents,
     fiadoAllocationCents.value,
   ).valid;
 });
@@ -517,7 +526,7 @@ watch(
 );
 
 watch(productSearchInput, (value) => {
-  if (!showProductSearchModal.value) {
+  if (!uiState.productSearchModal) {
     return;
   }
 
@@ -548,7 +557,7 @@ watch(
 );
 
 watch(
-  () => showWeightModal.value,
+  () => uiState.weightModal,
   async (isOpen) => {
     if (!isOpen) {
       return;
@@ -690,7 +699,7 @@ function toSearchProduct(item: unknown): Product {
 
 function handleCustomerPhoneInput(event: Event): void {
   const target = event.target as HTMLInputElement;
-  customerSearchInput.value = formatPhoneForInput(target.value);
+  customerState.searchInput = formatPhoneForInput(target.value);
 }
 
 function restoreProductInputFocus(): void {
@@ -701,7 +710,7 @@ function restoreProductInputFocus(): void {
 
 async function openCameraScanner(): Promise<void> {
   cameraError.value = null;
-  showCameraScanner.value = true;
+  uiState.cameraScanner = true;
 
   await nextTick();
 
@@ -796,7 +805,7 @@ function closeCameraScanner(): void {
   scannerControls = null;
   codeReader = null;
   isScanning.value = false;
-  showCameraScanner.value = false;
+  uiState.cameraScanner = false;
   cameraError.value = null;
 
   nextTick(() => {
@@ -1008,13 +1017,59 @@ function confirmChangeDiscount(): void {
   }
 
   saleStore.applyChangeDiscount(cents);
+  adjustPaymentRowsForDiscount(cents);
   showChangeDiscountInput.value = false;
   changeDiscountInput.value = "";
 }
 
 function removeChangeDiscount(): void {
+  const previousDiscount = saleStore.discountCents;
   saleStore.removeChangeDiscount();
   changeDiscountError.value = null;
+
+  if (previousDiscount > 0) {
+    adjustPaymentRowsForDiscount(-previousDiscount);
+  }
+}
+
+function adjustPaymentRowsForDiscount(discountCents: number): void {
+  if (!uiState.paymentModal || discountCents === 0) return;
+
+  if (discountCents > 0) {
+    let remainingDiscount = discountCents;
+
+    const cashRow = paymentRows.value.find((r) => r.method === PAYMENT_METHODS.CASH);
+    if (cashRow) {
+      const currentCents = parseCurrencyInputToCents(cashRow.amountInput);
+      const toSubtract = Math.min(currentCents, remainingDiscount);
+      cashRow.amountInput = formatCents(currentCents - toSubtract);
+      remainingDiscount -= toSubtract;
+    }
+
+    for (const row of paymentRows.value) {
+      if (remainingDiscount <= 0) break;
+      if (row.method === PAYMENT_METHODS.CASH) continue;
+
+      const currentCents = parseCurrencyInputToCents(row.amountInput);
+      const toSubtract = Math.min(currentCents, remainingDiscount);
+      row.amountInput = formatCents(currentCents - toSubtract);
+      remainingDiscount -= toSubtract;
+    }
+  } else {
+    const amountToAdd = Math.abs(discountCents);
+
+    const cashRow = paymentRows.value.find((r) => r.method === PAYMENT_METHODS.CASH);
+    if (cashRow) {
+      const currentCents = parseCurrencyInputToCents(cashRow.amountInput);
+      cashRow.amountInput = formatCents(currentCents + amountToAdd);
+    } else if (paymentRows.value.length > 0) {
+      const firstRow = paymentRows.value[0];
+      if (firstRow) {
+        const currentCents = parseCurrencyInputToCents(firstRow.amountInput);
+        firstRow.amountInput = formatCents(currentCents + amountToAdd);
+      }
+    }
+  }
 }
 
 function handleOpeningBalanceCurrencyInput(event: Event): void {
@@ -1043,16 +1098,16 @@ async function checkOpenCashRegister(): Promise<void> {
 
     if (!response.ok) {
       cashRegisterError.value = data.message || "Não foi possível verificar o caixa.";
-      showOpenCashModal.value = true;
+      uiState.openCashModal = true;
       return;
     }
 
     const list = Array.isArray(data.data) ? (data.data as CashRegister[]) : [];
     openCashRegister.value = list[0] || null;
-    showOpenCashModal.value = !openCashRegister.value;
+    uiState.openCashModal = !openCashRegister.value;
   } catch {
     cashRegisterError.value = "Falha de conexão ao validar caixa aberto.";
-    showOpenCashModal.value = true;
+    uiState.openCashModal = true;
   } finally {
     isCheckingCashRegister.value = false;
   }
@@ -1087,7 +1142,7 @@ async function submitOpenCashRegister(): Promise<void> {
     }
 
     openCashRegister.value = data.data as CashRegister;
-    showOpenCashModal.value = false;
+    uiState.openCashModal = false;
     openingBalanceInput.value = "";
   } catch {
     openingCashError.value = "Erro de conexão ao abrir caixa.";
@@ -1097,8 +1152,8 @@ async function submitOpenCashRegister(): Promise<void> {
 }
 
 async function searchCustomer(): Promise<void> {
-  const value = customerSearchInput.value.trim();
-  customerSearchMessage.value = null;
+  const value = customerState.searchInput.trim();
+  customerState.message = null;
 
   if (!value) {
     return;
@@ -1113,14 +1168,14 @@ async function searchCustomer(): Promise<void> {
     const data = await response.json();
 
     if (!response.ok) {
-      customerSearchMessage.value = data.message || "Falha ao buscar cliente.";
+      customerState.message = data.message || "Falha ao buscar cliente.";
       return;
     }
 
     const customers = ((data.data || []) as Customer[]).filter((customer) => customer.is_active);
-    selectedCustomer.value = customers[0] || null;
+    customerState.selected = customers[0] || null;
 
-    if (!selectedCustomer.value) {
+    if (!customerState.selected) {
       const inactiveLookupResponse = await authenticatedFetch(
         `/api/customers?search=${encodeURIComponent(searchValue)}`,
       );
@@ -1130,24 +1185,24 @@ async function searchCustomer(): Promise<void> {
       );
 
       if (hasInactiveMatch) {
-        customerSearchMessage.value = INACTIVE_CUSTOMER_SEARCH_MESSAGE;
+        customerState.message = INACTIVE_CUSTOMER_SEARCH_MESSAGE;
         return;
       }
 
-      customerSearchMessage.value = "Cliente não cadastrado";
+      customerState.message = "Cliente não cadastrado";
       return;
     }
 
-    customerSearchMessage.value = null;
+    customerState.message = null;
   } catch {
-    customerSearchMessage.value = "Erro de conexão ao buscar cliente.";
+    customerState.message = "Erro de conexão ao buscar cliente.";
   }
 }
 
 function clearSelectedCustomer(): void {
-  selectedCustomer.value = null;
-  customerSearchInput.value = "";
-  customerSearchMessage.value = null;
+  customerState.selected = null;
+  customerState.searchInput = "";
+  customerState.message = null;
 }
 
 function openCustomerListModal(): void {
@@ -1185,13 +1240,13 @@ async function loadCustomersForList(): Promise<void> {
 
 function selectCustomerFromList(customer: Customer): void {
   if (!customer.is_active) {
-    customerSearchMessage.value = INACTIVE_CUSTOMER_SEARCH_MESSAGE;
+    customerState.message = INACTIVE_CUSTOMER_SEARCH_MESSAGE;
     return;
   }
 
-  selectedCustomer.value = customer;
-  customerSearchInput.value = formatPhoneForInput(customer.phone || "");
-  customerSearchMessage.value = null;
+  customerState.selected = customer;
+  customerState.searchInput = formatPhoneForInput(customer.phone || "");
+  customerState.message = null;
   showCustomerListModal.value = false;
 }
 
@@ -1218,7 +1273,7 @@ async function handleProductEntry(): Promise<void> {
       weightedProduct.value = product;
       rawWeight.value = 0;
       weightedModalError.value = null;
-      showWeightModal.value = true;
+      uiState.weightModal = true;
       return;
     }
 
@@ -1309,7 +1364,7 @@ function requestManagerPin(action: PendingManagerPin): void {
   pendingManagerPinAction.value = action;
   managerPin.value = "";
   managerPinError.value = null;
-  showManagerPinModal.value = true;
+  uiState.managerPinModal = true;
 }
 
 async function validateManagerPinAndProceed(): Promise<void> {
@@ -1332,7 +1387,7 @@ async function validateManagerPinAndProceed(): Promise<void> {
     const pending = pendingManagerPinAction.value;
 
     if (!pending) {
-      showManagerPinModal.value = false;
+      uiState.managerPinModal = false;
       return;
     }
 
@@ -1345,7 +1400,7 @@ async function validateManagerPinAndProceed(): Promise<void> {
       resetSaleState();
     }
 
-    showManagerPinModal.value = false;
+    uiState.managerPinModal = false;
     pendingManagerPinAction.value = null;
   } catch {
     managerPinError.value = "Erro ao validar PIN.";
@@ -1401,7 +1456,7 @@ function confirmQuantityChange(): void {
   }
 
   saleStore.updateItemQuantity(lastAddedProduct.value.product_id, qty);
-  showQuantityModal.value = false;
+  uiState.quantityModal = false;
 }
 
 async function cancelSaleWithApproval(): Promise<void> {
@@ -1423,7 +1478,7 @@ async function cancelSaleWithApproval(): Promise<void> {
 }
 
 function openProductSearchModal(): void {
-  showProductSearchModal.value = true;
+  uiState.productSearchModal = true;
   productSearchInput.value = "";
   productSearchResults.value = [];
   productSearchError.value = null;
@@ -1462,70 +1517,70 @@ function selectProductFromSearch(product: Product): void {
     weightedProduct.value = product;
     rawWeight.value = 0;
     weightedModalError.value = null;
-    showWeightModal.value = true;
-    showProductSearchModal.value = false;
+    uiState.weightModal = true;
+    uiState.productSearchModal = false;
     return;
   }
 
   addProductToCart(product, 1);
-  showProductSearchModal.value = false;
+  uiState.productSearchModal = false;
 }
 
 function closeTopModal(): void {
-  if (showManagerPinModal.value) {
-    showManagerPinModal.value = false;
+  if (uiState.managerPinModal) {
+    uiState.managerPinModal = false;
     return;
   }
 
-  if (showWeightModal.value) {
-    showWeightModal.value = false;
+  if (uiState.weightModal) {
+    uiState.weightModal = false;
     return;
   }
 
-  if (showProductSearchModal.value) {
-    showProductSearchModal.value = false;
+  if (uiState.productSearchModal) {
+    uiState.productSearchModal = false;
     return;
   }
 
-  if (showPaymentModal.value) {
-    showPaymentModal.value = false;
+  if (uiState.paymentModal) {
+    uiState.paymentModal = false;
     paymentError.value = null;
     paymentSuccess.value = false;
     return;
   }
 
-  if (showCashOutModal.value) {
+  if (uiState.cashOutModal) {
     closeCashMovementModal();
     return;
   }
 
-  if (showCashInModal.value) {
+  if (uiState.cashInModal) {
     closeCashMovementModal();
   }
 }
 
 useModalStack(
   [
-    { isOpen: showHelpModal, close: () => { showHelpModal.value = false; } },
-    { isOpen: showQuantityModal, close: () => { showQuantityModal.value = false; } },
-    { isOpen: showOpenCashModal, close: () => { showOpenCashModal.value = false; } },
-    { isOpen: showManagerPinModal, close: () => { showManagerPinModal.value = false; } },
-    { isOpen: showWeightModal, close: () => { showWeightModal.value = false; } },
-    { isOpen: showProductSearchModal, close: () => { showProductSearchModal.value = false; } },
+    { isOpen: toRef(uiState, "helpModal"), close: () => { uiState.helpModal = false; } },
+    { isOpen: toRef(uiState, "quantityModal"), close: () => { uiState.quantityModal = false; } },
+    { isOpen: toRef(uiState, "openCashModal"), close: () => { uiState.openCashModal = false; } },
+    { isOpen: toRef(uiState, "managerPinModal"), close: () => { uiState.managerPinModal = false; } },
+    { isOpen: toRef(uiState, "weightModal"), close: () => { uiState.weightModal = false; } },
+    { isOpen: toRef(uiState, "productSearchModal"), close: () => { uiState.productSearchModal = false; } },
     {
-      isOpen: showPaymentModal,
+      isOpen: toRef(uiState, "paymentModal"),
       close: () => {
-        showPaymentModal.value = false;
+        uiState.paymentModal = false;
         paymentError.value = null;
         paymentSuccess.value = false;
       },
     },
     { isOpen: showPixQRCodeModal, close: closePixQRCodeModal },
     { isOpen: showPixManualConfirmModal, close: closePixManualConfirmModal },
-    { isOpen: showCashOutModal, close: closeCashMovementModal },
-    { isOpen: showCashInModal, close: closeCashMovementModal },
+    { isOpen: toRef(uiState, "cashOutModal"), close: closeCashMovementModal },
+    { isOpen: toRef(uiState, "cashInModal"), close: closeCashMovementModal },
     { isOpen: showCustomerListModal, close: () => { showCustomerListModal.value = false; } },
-    { isOpen: showCameraScanner, close: closeCameraScanner },
+    { isOpen: toRef(uiState, "cameraScanner"), close: closeCameraScanner },
   ],
   { listenEscape: false },
 );
@@ -1607,7 +1662,7 @@ function confirmWeightedItem(): void {
     });
   }
 
-  showWeightModal.value = false;
+  uiState.weightModal = false;
   productEntryInput.value = "";
 }
 
@@ -1624,7 +1679,7 @@ function openPaymentModal(): void {
   pixQRCodeError.value = null;
   paymentSuccess.value = false;
   void loadActiveCardMachines();
-  showPaymentModal.value = true;
+  uiState.paymentModal = true;
 }
 
 function addPaymentRow(): void {
@@ -1728,7 +1783,7 @@ async function confirmPayment(): Promise<void> {
       paymentMethod,
       operatorId,
       payments,
-      customerId: selectedCustomer.value?.id,
+      customerId: customerState.selected?.id,
       finalTotalCents,
       buildPayload: saleStore.buildPayload,
     });
@@ -1765,7 +1820,7 @@ async function confirmPayment(): Promise<void> {
 }
 
 function closePaymentModalAfterSuccess(): void {
-  showPaymentModal.value = false;
+  uiState.paymentModal = false;
   paymentSuccess.value = false;
   paymentError.value = null;
   cancelChangeDiscountInput();
@@ -1978,7 +2033,7 @@ async function confirmPixReceived(source: "manual" | "automatic" = "manual"): Pr
       paymentMethod,
       operatorId,
       payments,
-      customerId: selectedCustomer.value?.id,
+      customerId: customerState.selected?.id,
       finalTotalCents,
       buildPayload: saleStore.buildPayload,
     });
@@ -2053,19 +2108,19 @@ function openCashOutModal(): void {
   movementAmountInput.value = "";
   movementDescription.value = "";
   movementError.value = null;
-  showCashOutModal.value = true;
+  uiState.cashOutModal = true;
 }
 
 function openCashInModal(): void {
   movementAmountInput.value = "";
   movementDescription.value = "";
   movementError.value = null;
-  showCashInModal.value = true;
+  uiState.cashInModal = true;
 }
 
 function closeCashMovementModal(): void {
-  showCashOutModal.value = false;
-  showCashInModal.value = false;
+  uiState.cashOutModal = false;
+  uiState.cashInModal = false;
   movementAmountInput.value = "";
   movementDescription.value = "";
   movementError.value = null;
@@ -2126,8 +2181,8 @@ async function submitCashMovement(type: "cash-out" | "cash-in"): Promise<void> {
 function resetSaleState(): void {
   saleStore.clearCart();
   cancelChangeDiscountInput();
-  selectedCustomer.value = null;
-  customerSearchInput.value = "";
+  customerState.selected = null;
+  customerState.searchInput = "";
   selectedItemProductId.value = null;
   productEntryInput.value = "";
 }
@@ -2146,7 +2201,7 @@ const printDateTime = computed(() => formatDateTime(now.value));
 function handleGlobalKeydown(event: KeyboardEvent): void {
   if (event.key === "F1") {
     event.preventDefault();
-    showHelpModal.value = !showHelpModal.value;
+    uiState.helpModal = !uiState.helpModal;
     return;
   }
 
@@ -2205,7 +2260,7 @@ function handleGlobalKeydown(event: KeyboardEvent): void {
         lastAddedProduct.value = lastItem;
         newQuantityInput.value = lastItem.quantity;
         lastAddedProductError.value = null;
-        showQuantityModal.value = true;
+        uiState.quantityModal = true;
       }
     }
   }
@@ -2347,7 +2402,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
             @click="isPanelCollapsed = !isPanelCollapsed"
           >
             <span class="truncate text-sm font-medium text-gray-700">
-              {{ terminalId }} {{ selectedCustomer ? `· ${selectedCustomer.name}` : "· Sem cliente" }}
+              {{ terminalId }} {{ customerState.selected ? `· ${customerState.selected.name}` : "· Sem cliente" }}
             </span>
             <span
               class="ml-2 text-gray-400 transition-transform duration-200"
@@ -2388,7 +2443,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
               <button
                 type="button"
                 class="mt-1 flex h-7 items-center justify-center rounded-md border border-slate-300 px-3 text-xs font-medium text-slate-700 transition hover:bg-slate-100"
-                @click="showHelpModal = true"
+                @click="uiState.helpModal = true"
               >
                 Ajuda (F1)
               </button>
@@ -2601,7 +2656,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
     </div>
 
     <div
-      v-if="showOpenCashModal"
+      v-if="uiState.openCashModal"
       class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
@@ -2641,12 +2696,12 @@ function captureScannerInput(event: KeyboardEvent): boolean {
     </div>
 
     <div
-      v-if="showManagerPinModal"
+      v-if="uiState.managerPinModal"
       class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="sales-manager-pin-modal-title"
-      @click.self="showManagerPinModal = false"
+      @click.self="uiState.managerPinModal = false"
     >
       <div class="mx-auto max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5 shadow-lg">
         <h2 id="sales-manager-pin-modal-title" class="text-lg font-bold text-slate-900">Aprovação de Gerente</h2>
@@ -2667,7 +2722,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
           <button
             type="button"
             class="h-10 rounded-md border border-slate-300 px-3 text-slate-700 hover:bg-slate-100"
-            @click="showManagerPinModal = false"
+            @click="uiState.managerPinModal = false"
           >
             Cancelar
           </button>
@@ -2684,12 +2739,12 @@ function captureScannerInput(event: KeyboardEvent): boolean {
     </div>
 
     <div
-      v-if="showWeightModal"
+      v-if="uiState.weightModal"
       class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="sales-weight-modal-title"
-      @click.self="showWeightModal = false"
+      @click.self="uiState.weightModal = false"
     >
       <div class="mx-auto max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-lg">
         <h2 id="sales-weight-modal-title" class="text-lg font-bold text-slate-900">
@@ -2732,7 +2787,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
           <button
             type="button"
             class="h-10 rounded-md border border-slate-300 px-4 text-slate-700 hover:bg-slate-100"
-            @click="showWeightModal = false"
+            @click="uiState.weightModal = false"
           >
             Cancelar
           </button>
@@ -2750,12 +2805,12 @@ function captureScannerInput(event: KeyboardEvent): boolean {
     </div>
 
     <div
-      v-if="showProductSearchModal"
+      v-if="uiState.productSearchModal"
       class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="sales-product-search-modal-title"
-      @click.self="showProductSearchModal = false"
+      @click.self="uiState.productSearchModal = false"
     >
       <div class="mx-auto max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5 shadow-lg">
         <h2 id="sales-product-search-modal-title" class="text-lg font-bold text-slate-900">Busca de Produto (F2)</h2>
@@ -2806,17 +2861,17 @@ function captureScannerInput(event: KeyboardEvent): boolean {
     </div>
 
     <div
-      v-if="showHelpModal"
+      v-if="uiState.helpModal"
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="help-modal-title"
-      @click.self="showHelpModal = false"
+      @click.self="uiState.helpModal = false"
     >
       <div class="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
         <div class="mb-4 flex items-center justify-between">
           <h2 id="help-modal-title" class="text-lg font-bold text-slate-900">Atalhos de Venda</h2>
-          <button type="button" class="text-slate-400 hover:text-slate-600" aria-label="Fechar" @click="showHelpModal = false">
+          <button type="button" class="text-slate-400 hover:text-slate-600" aria-label="Fechar" @click="uiState.helpModal = false">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -2849,7 +2904,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
           </div>
         </div>
         <div class="mt-6 flex justify-end">
-          <button type="button" class="rounded-md bg-slate-100 border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200 focus:ring-1 focus:ring-slate-300" @click="showHelpModal = false">
+          <button type="button" class="rounded-md bg-slate-100 border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200 focus:ring-1 focus:ring-slate-300" @click="uiState.helpModal = false">
             Fechar
           </button>
         </div>
@@ -2857,12 +2912,12 @@ function captureScannerInput(event: KeyboardEvent): boolean {
     </div>
 
     <div
-      v-if="showQuantityModal"
+      v-if="uiState.quantityModal"
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="quantity-modal-title"
-      @click.self="showQuantityModal = false"
+      @click.self="uiState.quantityModal = false"
     >
       <div class="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
         <h2 id="quantity-modal-title" class="text-lg font-bold text-slate-900">Alterar Quantidade</h2>
@@ -2888,7 +2943,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
           <button
             type="button"
             class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-            @click="showQuantityModal = false"
+            @click="uiState.quantityModal = false"
           >
             Cancelar
           </button>
@@ -2904,12 +2959,12 @@ function captureScannerInput(event: KeyboardEvent): boolean {
     </div>
 
     <div
-      v-if="showPaymentModal"
+      v-if="uiState.paymentModal"
       class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="sales-payment-modal-title"
-      @click.self="!paymentSuccess && (showPaymentModal = false)"
+      @click.self="!paymentSuccess && (uiState.paymentModal = false)"
     >
       <div class="mx-auto max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-5 shadow-lg">
         <h2 id="sales-payment-modal-title" class="text-lg font-bold text-slate-900">Pagamento e Finalização</h2>
@@ -2942,10 +2997,10 @@ function captureScannerInput(event: KeyboardEvent): boolean {
 
           <div v-if="hasFiadoSelectedInPayment" class="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
             <p class="mb-2 text-sm font-medium text-slate-700">Cliente (obrigatório para Fiado)</p>
-            <div v-if="!selectedCustomer" class="flex flex-col gap-2 md:flex-row">
+            <div v-if="!customerState.selected" class="flex flex-col gap-2 md:flex-row">
               <div class="relative flex-1">
                 <input
-                  :value="customerSearchInput"
+                  :value="customerState.searchInput"
                   type="text"
                   inputmode="tel"
                   placeholder="Telefone ou nome do cliente"
@@ -2973,12 +3028,12 @@ function captureScannerInput(event: KeyboardEvent): boolean {
               </button>
             </div>
 
-            <div v-if="selectedCustomer" class="rounded-md border border-slate-200 bg-white p-3">
+            <div v-if="customerState.selected" class="rounded-md border border-slate-200 bg-white p-3">
               <div class="flex items-start justify-between gap-3">
                 <div>
-                  <p class="font-semibold text-slate-900">{{ selectedCustomer.name }}</p>
-                  <p v-if="selectedCustomer.phone" class="text-sm text-slate-500">
-                    Tel: {{ formatPhoneForDisplay(selectedCustomer.phone) }}
+                  <p class="font-semibold text-slate-900">{{ customerState.selected.name }}</p>
+                  <p v-if="customerState.selected.phone" class="text-sm text-slate-500">
+                    Tel: {{ formatPhoneForDisplay(customerState.selected.phone) }}
                   </p>
                   <p class="text-sm text-slate-500">
                     Saldo fiado:
@@ -2986,7 +3041,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
                       class="mx-1 inline-block"
                       :class="showCustomerDebt ? '' : 'blur-sm select-none'"
                     >
-                      {{ formatCents(Math.max(0, selectedCustomer.credit_limit_cents - selectedCustomer.current_debt_cents)) }}
+                      {{ formatCents(Math.max(0, customerState.selected.credit_limit_cents - customerState.selected.current_debt_cents)) }}
                     </span>
                     <button
                       type="button"
@@ -3008,7 +3063,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
               </div>
             </div>
 
-            <p v-if="customerSearchMessage" class="mt-2 text-sm text-slate-600">{{ customerSearchMessage }}</p>
+            <p v-if="customerState.message" class="mt-2 text-sm text-slate-600">{{ customerState.message }}</p>
           </div>
 
           <div class="mt-4 space-y-3">
@@ -3173,7 +3228,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
             <p v-if="isCashOnlyPayment && changeDiscountError" class="mt-2 text-xs text-red-700">{{ changeDiscountError }}</p>
           </div>
 
-          <div v-if="hasFiadoSelectedInPayment && selectedCustomer" class="mt-4 rounded-md border border-blue-200 bg-blue-50 p-3">
+          <div v-if="hasFiadoSelectedInPayment && customerState.selected" class="mt-4 rounded-md border border-blue-200 bg-blue-50 p-3">
             <p class="text-sm text-blue-700">
               Crédito disponível:
               <strong :class="hasFiadoInsufficientCredit ? 'text-red-700' : 'text-blue-900'">
@@ -3205,7 +3260,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
               <button
                 type="button"
                 class="min-h-11 rounded-md border border-slate-300 px-4 text-slate-700 hover:bg-slate-100"
-                @click="showPaymentModal = false"
+                @click="uiState.paymentModal = false"
               >
                 Cancelar
               </button>
@@ -3373,7 +3428,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
     </div>
 
     <div
-      v-if="showCashOutModal || showCashInModal"
+      v-if="uiState.cashOutModal || uiState.cashInModal"
       class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
@@ -3382,7 +3437,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
     >
       <div class="mx-auto max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5 shadow-lg">
         <h2 id="sales-cash-movement-modal-title" class="text-lg font-bold text-slate-900">
-          {{ showCashOutModal ? "Sangria" : "Suprimento" }}
+          {{ uiState.cashOutModal ? "Sangria" : "Suprimento" }}
         </h2>
 
         <div class="mt-4">
@@ -3403,7 +3458,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
             v-model="movementDescription"
             type="text"
             class="h-11 w-full rounded-md border border-slate-300 px-3 outline-none focus:border-blue-500"
-            :placeholder="showCashOutModal ? 'Ex.: retirada para troco' : 'Ex.: reforço de caixa'"
+            :placeholder="uiState.cashOutModal ? 'Ex.: retirada para troco' : 'Ex.: reforço de caixa'"
           />
         </div>
 
@@ -3421,7 +3476,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
             type="button"
             class="h-10 rounded-md bg-blue-700 px-4 font-semibold text-white hover:bg-blue-800 disabled:opacity-60"
             :disabled="movementLoading"
-            @click="showCashOutModal ? submitCashMovement('cash-out') : submitCashMovement('cash-in')"
+            @click="uiState.cashOutModal ? submitCashMovement('cash-out') : submitCashMovement('cash-in')"
           >
             {{ movementLoading ? "Processando..." : "Confirmar" }}
           </button>
@@ -3491,7 +3546,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
 
     <Teleport to="body">
       <div
-        v-if="showCameraScanner"
+        v-if="uiState.cameraScanner"
         class="fixed inset-0 z-50 flex flex-col bg-black"
         role="dialog"
         aria-modal="true"
@@ -3558,38 +3613,53 @@ function captureScannerInput(event: KeyboardEvent): boolean {
     </Teleport>
   </div>
 
-  <div id="print-receipt" class="hidden p-6 font-mono text-sm print:block">
-    <div class="mb-4 text-center">
-      <p class="text-lg font-bold">{{ storeName }}</p>
-      <p class="text-xs text-gray-500">{{ storeAddress }}</p>
-      <p class="text-xs text-gray-500">{{ storePhone }}</p>
-      <div class="my-2 border-t border-dashed"></div>
-      <p class="text-base font-bold">COMPROVANTE DE VENDA</p>
-      <p class="text-xs text-gray-500">Documento sem valor fiscal</p>
-      <p class="text-xs">Nº {{ printReceiptNumber }}</p>
-      <p class="text-xs">{{ printDateTime }}</p>
+  <div id="print-receipt" class="hidden print:block print:w-[80mm] print:max-w-[300px] print:mx-auto print:text-black print:bg-white font-mono text-[11px] leading-tight text-black">
+    <div class="mb-2 text-center">
+      <p class="text-sm font-bold">{{ storeName }}</p>
+      <p>{{ storeAddress }}</p>
+      <p>{{ storePhone }}</p>
+      <div class="my-2 border-t border-dashed border-black"></div>
+      <p class="font-bold">COMPROVANTE DE VENDA</p>
+      <p>Documento sem valor fiscal</p>
+      <p>Nº {{ printReceiptNumber }}</p>
+      <p>{{ printDateTime }}</p>
     </div>
 
-    <div class="mb-3 border-t border-dashed pt-2">
-      <p class="mb-1 text-xs font-semibold">Itens</p>
-      <div v-for="(item, index) in saleStore.items" :key="`print-${item.product_id}-${index}`" class="mb-1 text-xs">
-        <p>{{ item.product_name }}</p>
-        <p class="text-[11px] text-gray-600">
-          {{ item.is_bulk ? item.quantity.toFixed(3) : item.quantity }} x {{ formatCents(item.unit_price_cents) }}
-          = {{ formatCents((item.is_bulk ? (item.total_cents || 0) : (item.unit_price_cents * item.quantity)) - item.discount_cents) }}
-        </p>
+    <div class="mb-2 border-t border-dashed border-black pt-2">
+      <p class="mb-1 font-bold">Itens</p>
+      <div v-for="(item, index) in saleStore.items" :key="`print-${item.product_id}-${index}`" class="mb-1 pb-1">
+        <p class="text-left truncate">{{ item.product_name }}</p>
+        <div class="flex justify-between w-full">
+          <span>{{ item.is_bulk ? item.quantity.toFixed(3) : item.quantity }} x {{ formatCents(item.unit_price_cents) }}</span>
+          <span>{{ formatCents((item.is_bulk ? (item.total_cents || 0) : (item.unit_price_cents * item.quantity)) - item.discount_cents) }}</span>
+        </div>
       </div>
-      <p v-if="saleStore.items.length === 0" class="text-xs text-gray-500">Sem itens registrados.</p>
+      <p v-if="saleStore.items.length === 0" class="text-center">Sem itens registrados.</p>
     </div>
 
-    <div class="border-t border-dashed pt-2 text-xs">
-      <div class="flex items-center justify-between">
+    <div class="border-t border-dashed border-black pt-2">
+      <div class="flex justify-between w-full">
         <span>Subtotal</span>
-        <strong>{{ formatCents(subtotalCents) }}</strong>
+        <span>{{ formatCents(subtotalCents) }}</span>
       </div>
-      <div class="flex items-center justify-between">
-        <span>Total</span>
-        <strong>{{ formatCents(totalCents) }}</strong>
+      <div v-if="saleStore.discountCents > 0" class="flex justify-between w-full">
+        <span>Desconto</span>
+        <span>- {{ formatCents(saleStore.discountCents) }}</span>
+      </div>
+      <div class="flex justify-between w-full font-bold mt-1 text-[12px]">
+        <span>Total a Pagar</span>
+        <span>{{ formatCents(totalCents) }}</span>
+      </div>
+
+      <div class="border-t border-dashed border-black mt-2 pt-2">
+        <div v-for="(row, index) in paymentRows" :key="`print-pay-${index}`" class="flex justify-between w-full">
+          <span>{{ paymentMethods.find(m => m.value === row.method)?.label || 'Pagamento' }}</span>
+          <span>{{ formatCents(parseCurrencyInputToCents(row.amountInput)) }}</span>
+        </div>
+        <div class="flex justify-between w-full mt-1 font-bold">
+          <span>Troco</span>
+          <span>{{ formatCents(cashChangeCents) }}</span>
+        </div>
       </div>
     </div>
   </div>
@@ -3603,3 +3673,10 @@ function captureScannerInput(event: KeyboardEvent): boolean {
     @cancel="onCancel"
   />
 </template>
+
+<style>
+@media print {
+  @page { margin: 0; }
+  body { margin: 0; }
+}
+</style>
