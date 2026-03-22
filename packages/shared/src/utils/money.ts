@@ -14,7 +14,7 @@ export function formatCents(cents: number): string {
  * Ex.: "10,50" → 1050
  */
 export function parseCentsFromString(value: string): number {
-  const sanitized = value.replace(/[^\d,.-]/g, "").replace(",", ".");
+  const sanitized = value.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", ".");
   const parsed = parseFloat(sanitized);
 
   if (Number.isNaN(parsed)) {

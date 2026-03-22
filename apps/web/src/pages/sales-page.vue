@@ -220,7 +220,7 @@ const cardPaymentRows = computed(() => {
 });
 
 const totalFeeCents = computed(() => {
-  return cardPaymentRows.value.reduce((sum, row) => {
+  return paymentRows.value.reduce((sum, row) => {
     return sum + getFeeCentsForRow(row);
   }, 0);
 });
@@ -817,7 +817,7 @@ function handlePaymentRowCurrencyInput(event: Event, row: PaymentEntry): void {
     const otherRow = paymentRows.value.find((r) => r !== row);
     if (otherRow) {
       const currentCents = parseCurrencyInputToCents(row.amountInput);
-      const remainingCents = Math.max(0, totalWithFeesCents.value - currentCents);
+      const remainingCents = Math.max(0, totalCents.value - currentCents);
       otherRow.amountInput = formatCents(remainingCents);
     }
   }
@@ -924,18 +924,13 @@ function updateFinalizedPaymentSummary(): void {
 function handlePaymentMethodChange(row: PaymentEntry): void {
   if (!isCardMethod(row.method)) {
     row.card_machine_id = undefined;
-    row.installments = undefined;
+    row.installments = 1;
     return;
   }
 
   const firstActive = cardMachines.value.find((machine) => machine.is_active);
-  row.card_machine_id = firstActive?.id;
-
-  if (row.method === PAYMENT_METHODS.CREDIT_CARD) {
-    row.installments = 1;
-  } else {
-    row.installments = undefined;
-  }
+  row.card_machine_id = firstActive?.id ?? undefined;
+  row.installments = 1;
 }
 
 async function loadActiveCardMachines(): Promise<void> {
@@ -1622,7 +1617,7 @@ function openPaymentModal(): void {
     return;
   }
 
-  paymentRows.value = [{ method: PAYMENT_METHODS.CASH, amountInput: formatCents(totalCents.value) }];
+  paymentRows.value = [{ method: PAYMENT_METHODS.CASH, amountInput: formatCents(totalCents.value), card_machine_id: undefined, installments: 1 }];
   cashReceivedInput.value = "";
   cancelChangeDiscountInput();
   paymentError.value = null;
@@ -1643,7 +1638,7 @@ function addPaymentRow(): void {
     return;
   }
 
-  const row: PaymentEntry = { method: firstAvailable.value, amountInput: "", card_machine_id: undefined };
+  const row: PaymentEntry = { method: firstAvailable.value, amountInput: "", card_machine_id: undefined, installments: 1 };
   handlePaymentMethodChange(row);
   paymentRows.value.push(row);
 }
@@ -3190,15 +3185,6 @@ function captureScannerInput(event: KeyboardEvent): boolean {
             </p>
           </div>
 
-          <div class="mt-4 rounded-md border border-slate-200 p-3">
-            <p class="text-sm text-slate-700">
-              Saldo restante:
-              <strong :class="remainingCents === 0 ? 'text-green-700' : 'text-amber-700'">
-                {{ formatCents(Math.abs(remainingCents)) }}
-              </strong>
-            </p>
-          </div>
-
           <p v-if="paymentError" role="alert" class="mt-3 text-sm text-red-700">
             {{ paymentError }}
           </p>
@@ -3207,22 +3193,31 @@ function captureScannerInput(event: KeyboardEvent): boolean {
             {{ fiadoInactiveCustomerError }}
           </p>
 
-          <div class="mt-4 flex justify-end gap-2">
-            <button
-              type="button"
-              class="min-h-11 rounded-md border border-slate-300 px-4 text-slate-700 hover:bg-slate-100"
-              @click="showPaymentModal = false"
-            >
-              Cancelar
-            </button>
-            <button
-              type="button"
-              class="min-h-11 rounded-md bg-blue-700 px-4 font-semibold text-white hover:bg-blue-800 disabled:opacity-60"
-              :disabled="paymentLoading || !!fiadoInactiveCustomerError || hasFiadoInsufficientCredit"
-              @click="confirmPayment"
-            >
-              {{ paymentLoading ? "Confirmando..." : "Confirmar" }}
-            </button>
+          <div class="mt-4 flex items-center justify-between rounded-md border border-slate-200 p-3">
+            <p class="text-sm text-slate-700">
+              Saldo restante:
+              <strong :class="remainingCents === 0 ? 'text-green-700' : 'text-amber-700'">
+                {{ formatCents(Math.abs(remainingCents)) }}
+              </strong>
+            </p>
+
+            <div class="flex gap-2">
+              <button
+                type="button"
+                class="min-h-11 rounded-md border border-slate-300 px-4 text-slate-700 hover:bg-slate-100"
+                @click="showPaymentModal = false"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                class="min-h-11 rounded-md bg-blue-700 px-4 font-semibold text-white hover:bg-blue-800 disabled:opacity-60"
+                :disabled="paymentLoading || !!fiadoInactiveCustomerError || hasFiadoInsufficientCredit"
+                @click="confirmPayment"
+              >
+                {{ paymentLoading ? "Confirmando..." : "Confirmar" }}
+              </button>
+            </div>
           </div>
         </template>
       </div>

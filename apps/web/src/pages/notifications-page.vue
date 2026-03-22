@@ -95,9 +95,6 @@ async function handleMarkAllRead(): Promise<void> {
 }
 
 async function handleDeleteRead(): Promise<void> {
-  const confirmDelete = window.confirm("Tem certeza que deseja apagar todas as notificações lidas? Esta ação não pode ser desfeita.");
-  if (!confirmDelete) return;
-
   await deleteRead();
   await loadNotifications();
 }
@@ -174,7 +171,7 @@ onMounted(() => {
       <main class="flex-1 overflow-auto p-4 md:p-6">
         <!-- Cabeçalho da página -->
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div></div>
+          <h1 class="text-xl font-bold text-gray-900">Notificações</h1>
           <div class="flex items-center gap-2">
             <button
               v-if="canAcknowledge"
