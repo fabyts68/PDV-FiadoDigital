@@ -3,13 +3,14 @@ import {
   createWebHistory,
   type RouteRecordRaw,
 } from "vue-router";
+import LoginPage from "@/pages/login-page.vue";
 import { setupGuards } from "./guards.js";
 
 const routes: RouteRecordRaw[] = [
   {
     path: "/login",
     name: "login",
-    component: () => import("@/pages/login-page.vue"),
+    component: LoginPage,
     meta: { requiresAuth: false, title: "Login" },
   },
   {
@@ -63,6 +64,12 @@ const routes: RouteRecordRaw[] = [
     name: "notifications",
     component: () => import("@/pages/notifications-page.vue"),
     meta: { requiresAuth: true, roles: ["admin", "manager", "operator"], title: "Notificações" },
+  },
+  {
+    path: "/smartphone-access",
+    name: "smartphone-access",
+    component: () => import("@/pages/smartphone-access-page.vue"),
+    meta: { requiresAuth: true, roles: ["admin", "manager", "operator"], title: "Acesso Smartphone" },
   },
 ];
 

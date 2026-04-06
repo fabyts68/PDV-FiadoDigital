@@ -1,9 +1,11 @@
 import { useAuthStore } from "@/stores/auth.store.js";
 import { useRouter } from "vue-router";
+import { useErrorHandler } from "./use-error-handler.js";
 
 export function useApi() {
   const auth = useAuthStore();
   const router = useRouter();
+  const { handleError } = useErrorHandler();
 
   async function authenticatedFetch(
     url: string,
@@ -45,6 +47,10 @@ export function useApi() {
         router.push({ name: "login" });
         throw new Error("Sessão expirada");
       }
+    }
+    // Processar outras respostas com erro globalmente via useErrorHandler
+    if (!response.ok) {
+      void handleError(response);
     }
 
     return response;

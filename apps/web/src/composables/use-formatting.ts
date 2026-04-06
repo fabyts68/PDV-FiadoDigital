@@ -1,4 +1,5 @@
 import { formatCents, parseCentsFromString } from "@pdv/shared";
+type PixKeyType = "cpf" | "cnpj" | "email" | "phone" | "random";
 
 export function useFormatting() {
   function normalizeDigits(rawValue: string): string {
@@ -201,6 +202,53 @@ export function useFormatting() {
     });
   }
 
+  /**
+   * Converte bytes para uma string legível (KB, MB ou GB).
+   * Usa locale pt-BR com até 2 casas decimais.
+   */
+  function formatFileSize(bytes: number): string {
+    if (bytes < 0) {
+      return "0 B";
+    }
+
+    if (bytes < 1024) {
+      return `${bytes} B`;
+    }
+
+    if (bytes < 1024 * 1024) {
+      return `${(bytes / 1024).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 2 })} KB`;
+    }
+
+    if (bytes < 1024 * 1024 * 1024) {
+      return `${(bytes / (1024 * 1024)).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 2 })} MB`;
+    }
+
+    return `${(bytes / (1024 * 1024 * 1024)).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 2 })} GB`;
+  }
+
+  function formatStoredPixKeyForDisplay(type: PixKeyType | "", value: string): string {
+    if (type === "cpf") {
+      return formatCpfForInput(value);
+    }
+  
+    if (type === "cnpj") {
+      return formatCnpjForInput(value);
+    }
+  
+    if (type === "phone") {
+      return formatPhoneForInput(value);
+    }
+  
+    return value;
+  }
+
+  function formatDateTimeForDisplay(isoString: string | Date | null): string {
+    if (!isoString) {
+      return "";
+    }
+    return new Date(isoString).toLocaleString("pt-BR");
+  }
+
   return {
     normalizeDigits,
     normalizePhoneDigits,
@@ -215,5 +263,8 @@ export function useFormatting() {
     parseWeightInputToNullableKg,
     formatStockQuantity,
     displayPercent,
+    formatFileSize,
+    formatStoredPixKeyForDisplay,
+    formatDateTimeForDisplay,
   };
 }
