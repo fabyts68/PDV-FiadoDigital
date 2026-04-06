@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { formatCents } from "@pdv/shared";
 
 const props = defineProps<{
@@ -10,6 +10,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: "drill-down", method: string): void;
 }>();
+
+const hoveredSlice = ref<string | null>(null);
 
 interface DonutSegment {
   key: string;
@@ -28,11 +30,11 @@ interface DonutSegment {
 type PaymentKey = "cash" | "pix" | "credit_card" | "debit_card" | "fiado";
 
 const palette: Record<PaymentKey, string> = {
-  cash:        "#16a34a",
-  pix:         "#2563eb",
-  credit_card: "#7c3aed",
-  debit_card:  "#0891b2",
-  fiado:       "#d97706",
+  cash:        "#009E73",  // Verde-azulado (teal)
+  pix:         "#0072B2",  // Azul
+  credit_card: "#CC79A7",  // Rosa/púrpura
+  debit_card:  "#56B4E9",  // Azul-claro (sky blue)
+  fiado:       "#E69F00",  // Âmbar/laranja
 };
 
 const metadata: Record<PaymentKey, { label: string; icon: string }> = {
@@ -97,6 +99,12 @@ const ariaChartDescription = computed(() =>
     .join(", "),
 );
 
+const hoveredSegment = computed(() =>
+  hoveredSlice.value
+    ? segments.value.find((s) => s.key === hoveredSlice.value) ?? null
+    : null,
+);
+
 function displayValue(value: number): string {
   if (!props.showValues) {
     return "R$ ••••";
@@ -129,114 +137,185 @@ function onSegmentKeydown(event: KeyboardEvent, key: string): void {
 
 <template>
   <div>
-    <p v-if="total <= 0" class="text-sm text-gray-500">Nenhuma venda registrada hoje.</p>
-
-    <div v-else class="flex min-w-0 flex-col gap-4 md:grid md:grid-cols-[220px_minmax(0,1fr)] md:items-center md:gap-6">
-      <!-- Acessibilidade: aria-label dinâmico descrevendo todas as fatias -->
-      <svg
-        viewBox="0 0 200 200"
-        class="h-48 w-48 shrink-0 self-center md:h-56 md:w-56"
-        role="img"
-        :aria-label="`Distribuição de vendas por meio de pagamento. ${ariaChartDescription}`"
-      >
-        <!-- Trilha de fundo -->
-        <circle :cx="chartCenter" :cy="chartCenter" :r="chartRadius" fill="none" stroke="#e5e7eb" :stroke-width="chartStrokeWidth" />
-
-        <!-- Segmentos interativos -->
-        <g v-for="segment in segments" :key="segment.key">
-          <circle
-            :cx="chartCenter"
-            :cy="chartCenter"
-            :r="chartRadius"
-            fill="none"
-            :stroke="segment.color"
-            :stroke-width="chartStrokeWidth"
-            stroke-linecap="butt"
-            :stroke-dasharray="segment.dashArray"
-            :stroke-dashoffset="segment.dashOffset"
-            :transform="`rotate(-90 ${chartCenter} ${chartCenter})`"
-            class="cursor-pointer transition-opacity hover:opacity-75 focus:opacity-75 focus:outline-none"
-            :aria-label="`${segment.label}: ${segment.percentage}% — clique para ver detalhes`"
-            role="button"
-            tabindex="0"
-            @click="onSegmentClick(segment.key)"
-            @keydown="onSegmentKeydown($event, segment.key)"
-          >
-            <title>{{ segment.label }}: {{ segment.percentage }}%</title>
-          </circle>
-
-          <!-- Padrão de tracejado adicional no segmento de Débito (acessibilidade daltonismo) -->
-          <circle
-            v-if="segment.isDebitCard && segment.percentage > 0"
-            :cx="chartCenter"
-            :cy="chartCenter"
-            :r="chartRadius"
-            fill="none"
-            stroke="white"
-            stroke-width="4"
-            stroke-linecap="butt"
-            :stroke-dasharray="`4 ${chartCircumference - 4}`"
-            :stroke-dashoffset="segment.dashOffset"
-            :transform="`rotate(-90 ${chartCenter} ${chartCenter})`"
-            style="pointer-events: none"
-            aria-hidden="true"
-          />
-        </g>
-
-        <!-- Percentual dentro das fatias maiores -->
-        <template v-for="segment in segments" :key="`pct-${segment.key}`">
-          <text
-            v-if="segment.percentage > 10"
-            :x="getTextPosition(segment.startAngle, segment.endAngle).x"
-            :y="getTextPosition(segment.startAngle, segment.endAngle).y"
-            text-anchor="middle"
-            dominant-baseline="middle"
-            class="font-bold"
-            style="font-size: 11px; fill: #1e293b; stroke: white; stroke-width: 3px; paint-order: stroke fill; pointer-events: none"
-            aria-hidden="true"
-          >{{ segment.percentage }}%</text>
-        </template>
-
-        <!-- Total centralizado no buraco da rosca -->
+    <!-- Empty State -->
+    <div v-if="total <= 0" class="flex flex-col items-center gap-4 py-4">
+      <svg viewBox="0 0 200 200" class="h-40 w-40">
+        <circle
+          :cx="chartCenter"
+          :cy="chartCenter"
+          :r="chartRadius"
+          fill="none"
+          stroke="#E2E8F0"
+          :stroke-width="chartStrokeWidth"
+        />
         <text
           x="100"
-          y="92"
+          y="96"
           text-anchor="middle"
-          style="font-size: 13px; font-weight: 700; fill: #1e293b"
-          aria-hidden="true"
-        >{{ showValues ? formatCents(total) : "••••" }}</text>
-        <text
-          x="100"
-          y="110"
-          text-anchor="middle"
-          style="font-size: 9px; fill: #64748b"
-          aria-hidden="true"
-        >total hoje</text>
+          dominant-baseline="middle"
+          style="font-size: 11px; fill: #94a3b8"
+        >R$ 0,00</text>
       </svg>
+      <div class="text-center">
+        <p class="text-sm font-medium text-gray-500">Sem vendas no período selecionado</p>
+        <p class="mt-1 text-xs text-gray-400">Altere o filtro de período para visualizar outros dados.</p>
+      </div>
+    </div>
 
-      <!-- Melhoria 4: legenda ordenada por valor decrescente -->
-      <ul class="min-w-0 w-full space-y-1.5" aria-label="Detalhes por meio de pagamento">
+    <!-- Donut Chart -->
+    <div v-else class="flex flex-col items-center gap-4 sm:flex-row sm:items-start sm:gap-6">
+      <div class="flex shrink-0 flex-col items-center">
+        <svg
+          viewBox="0 0 200 200"
+          class="h-48 w-48 sm:h-52 sm:w-52"
+          role="img"
+          :aria-label="`Distribuição de vendas por meio de pagamento. ${ariaChartDescription}`"
+          @mouseleave="hoveredSlice = null"
+        >
+          <!-- Trilha de fundo -->
+          <circle
+            :cx="chartCenter"
+            :cy="chartCenter"
+            :r="chartRadius"
+            fill="none"
+            stroke="#e5e7eb"
+            :stroke-width="chartStrokeWidth"
+          />
+
+          <!-- Segmentos interativos -->
+          <g v-for="segment in segments" :key="segment.key">
+            <circle
+              :cx="chartCenter"
+              :cy="chartCenter"
+              :r="chartRadius"
+              fill="none"
+              :stroke="segment.color"
+              :stroke-width="hoveredSlice === segment.key ? chartStrokeWidth + 4 : chartStrokeWidth"
+              stroke-linecap="butt"
+              :stroke-dasharray="segment.dashArray"
+              :stroke-dashoffset="segment.dashOffset"
+              :transform="`rotate(-90 ${chartCenter} ${chartCenter})`"
+              class="cursor-pointer focus:outline-none"
+              style="transition: stroke-width 0.2s ease"
+              :aria-label="`${segment.label}: ${segment.percentage}% — clique para ver detalhes`"
+              role="button"
+              tabindex="0"
+              @mouseenter="hoveredSlice = segment.key"
+              @touchstart.passive="hoveredSlice = segment.key"
+              @click="onSegmentClick(segment.key)"
+              @keydown="onSegmentKeydown($event, segment.key)"
+            >
+              <title>{{ segment.label }}: {{ segment.percentage }}%</title>
+            </circle>
+
+            <!-- Padrão de tracejado adicional no segmento de Débito (acessibilidade daltonismo) -->
+            <circle
+              v-if="segment.isDebitCard && segment.percentage > 0"
+              :cx="chartCenter"
+              :cy="chartCenter"
+              :r="chartRadius"
+              fill="none"
+              stroke="white"
+              stroke-width="4"
+              stroke-linecap="butt"
+              :stroke-dasharray="`4 ${chartCircumference - 4}`"
+              :stroke-dashoffset="segment.dashOffset"
+              :transform="`rotate(-90 ${chartCenter} ${chartCenter})`"
+              style="pointer-events: none"
+              aria-hidden="true"
+            />
+          </g>
+
+          <!-- Percentual dentro das fatias maiores -->
+          <template v-for="segment in segments" :key="`pct-${segment.key}`">
+            <text
+              v-if="segment.percentage > 10 && !hoveredSlice"
+              :x="getTextPosition(segment.startAngle, segment.endAngle).x"
+              :y="getTextPosition(segment.startAngle, segment.endAngle).y"
+              text-anchor="middle"
+              dominant-baseline="middle"
+              class="font-bold"
+              style="font-size: 11px; fill: #1e293b; stroke: white; stroke-width: 3px; paint-order: stroke fill; pointer-events: none"
+              aria-hidden="true"
+            >{{ segment.percentage }}%</text>
+          </template>
+
+          <!-- Centro dinâmico: Hover mostra detalhes da fatia, padrão mostra total -->
+          <template v-if="hoveredSegment">
+            <text
+              x="100"
+              y="85"
+              text-anchor="middle"
+              style="font-size: 10px; fill: #64748b; font-weight: 500"
+              aria-hidden="true"
+            >{{ hoveredSegment.icon }} {{ hoveredSegment.label }}</text>
+            <text
+              x="100"
+              y="102"
+              text-anchor="middle"
+              style="font-size: 14px; font-weight: 700; fill: #1e293b"
+              aria-hidden="true"
+            >{{ showValues ? formatCents(hoveredSegment.value) : "••••" }}</text>
+            <text
+              x="100"
+              y="117"
+              text-anchor="middle"
+              style="font-size: 11px; font-weight: 600"
+              :style="{ fill: hoveredSegment.color }"
+              aria-hidden="true"
+            >{{ hoveredSegment.percentage }}%</text>
+          </template>
+          <template v-else>
+            <text
+              x="100"
+              y="94"
+              text-anchor="middle"
+              style="font-size: 14px; font-weight: 700; fill: #1e293b"
+              aria-hidden="true"
+            >{{ showValues ? formatCents(total) : "••••" }}</text>
+            <text
+              x="100"
+              y="112"
+              text-anchor="middle"
+              style="font-size: 9px; fill: #64748b"
+              aria-hidden="true"
+            >Total</text>
+          </template>
+        </svg>
+        <p class="mt-2 text-center text-xs text-gray-400">👆 Toque em uma fatia para ver detalhes</p>
+      </div>
+
+      <!-- Legenda rica -->
+      <ul
+        class="grid w-full grid-cols-2 gap-2 sm:grid-cols-1 sm:gap-1.5"
+        aria-label="Detalhes por meio de pagamento"
+      >
         <li
           v-for="segment in segments"
           :key="segment.key"
           :class="[
-            'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 rounded-lg border px-3 py-2 transition-opacity',
-            segment.value === 0 ? 'border-gray-50 opacity-40' : 'border-gray-100'
+            'flex items-center justify-between gap-2 rounded-lg border px-3 py-2 transition-all',
+            segment.value === 0
+              ? 'border-gray-50 opacity-40'
+              : hoveredSlice === segment.key
+                ? 'border-primary/30 bg-primary/5 shadow-sm'
+                : 'border-gray-100',
           ]"
+          @mouseenter="hoveredSlice = segment.key"
+          @mouseleave="hoveredSlice = null"
         >
-          <div class="flex min-w-0 items-center gap-2 overflow-hidden text-sm text-gray-700">
+          <div class="flex min-w-0 items-center gap-2">
             <span
-              class="inline-block h-3 w-3 shrink-0 rounded-sm"
+              class="inline-block h-3 w-3 shrink-0 rounded-full"
               :style="{ backgroundColor: segment.color }"
               aria-hidden="true"
             />
-            <span aria-hidden="true">{{ segment.icon }}</span>
-            <span class="truncate">{{ segment.label }}</span>
+            <div class="min-w-0">
+              <p class="truncate text-sm font-medium text-gray-700">{{ segment.label }}</p>
+              <p class="text-xs text-gray-500">{{ displayValue(segment.value) }}</p>
+            </div>
           </div>
-          <div class="shrink-0 text-right">
-            <p class="text-sm font-semibold text-gray-900">{{ displayValue(segment.value) }}</p>
-            <p class="text-xs text-gray-500">{{ segment.percentage }}%</p>
-          </div>
+          <span class="shrink-0 text-base font-bold text-gray-800">{{ segment.percentage }}%</span>
         </li>
       </ul>
     </div>
