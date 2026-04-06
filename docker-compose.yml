@@ -10,6 +10,7 @@ services:
       - ./packages/shared/src:/app/packages/shared/src
       - ./prisma:/app/prisma
       - ./data:/app/data
+      - ./backups:/var/backups/pdv
     env_file:
       - .env
     environment:
