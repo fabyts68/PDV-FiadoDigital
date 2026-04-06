@@ -1,5 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { DomainError } from "../errors/domain-error.js";
+import { ZodError } from "zod";
+import { logError } from "../utils/logger.js";
 
 export function errorHandler(
   err: Error,
@@ -7,11 +9,22 @@ export function errorHandler(
   res: Response,
   _next: NextFunction,
 ): void {
-  console.error("[PDV API] Erro:", err.message);
+  const requestId = (_req as any).id || (_req as any).requestId || res.locals?.requestId;
+  const userId = res.locals?.user?.id;
+  logError("Erro", err, { tag: "PDV API", requestId, userId });
+
+  if (err instanceof ZodError) {
+    res.status(400).json({
+      success: false,
+      message: "Dados inválidos",
+      errors: err.flatten().fieldErrors,
+    });
+    return;
+  }
 
   const statusCode = err instanceof DomainError ? err.statusCode : 500;
   const message =
-    process.env.NODE_ENV === "production" ? "Erro interno" : err.message;
+    process.env.NODE_ENV === "production" && statusCode === 500 ? "Erro interno" : err.message;
 
   res.status(statusCode).json({ success: false, message });
 }
