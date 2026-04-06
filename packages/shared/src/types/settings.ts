@@ -26,6 +26,14 @@ export const KNOWN_SETTING_KEYS = [
   "fiado_alert_on_due_day",
   "whatsapp_message_fiado_vencido",
   "whatsapp_message_fiado_a_vencer",
+  "backup_path",
+  "backup_frequency",
+  "backup_retention",
+  "backup_cloud_enabled",
+  "backup_cloud_token",
+  "backup_encryption_enabled",
+  "backup_password",
+  "backup_time",
 ] as const;
 
 export type SettingsPixKeyType = (typeof PIX_KEY_TYPES)[number];
@@ -57,6 +65,14 @@ export type KnownSettingValueMap = {
   fiado_alert_on_due_day: "true" | "false";
   whatsapp_message_fiado_vencido: string;
   whatsapp_message_fiado_a_vencer: string;
+  backup_path: string;
+  backup_frequency: string;
+  backup_retention: `${number}`;
+  backup_cloud_enabled: "true" | "false";
+  backup_cloud_token: string;
+  backup_encryption_enabled: "true" | "false";
+  backup_password: string;
+  backup_time: string;
 };
 
 export type SettingValue<K extends SettingKey = SettingKey> = K extends KnownSettingKey

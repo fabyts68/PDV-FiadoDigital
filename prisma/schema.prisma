@@ -307,6 +307,8 @@ model CardMachine {
   updated_at DateTime          @updatedAt
   deleted_at DateTime?
 
+  @@index([deleted_at])
+  @@index([is_active])
   @@map("card_machines")
 }
 
@@ -321,6 +323,7 @@ model CardMachineRate {
   created_at               DateTime    @default(now())
   updated_at               DateTime    @updatedAt
 
+  @@index([card_machine_id])
   @@map("card_machine_rates")
 }
 
@@ -328,11 +331,19 @@ model CardMachineRate {
 // Settings — Configurações do sistema
 // ------------------------------------------
 model Settings {
-  id         String   @id @default(uuid())
-  key        String   @unique
-  value      String
-  updated_at DateTime @updatedAt
-  deleted_at DateTime?
+  id                        String    @id @default(uuid())
+  key                       String    @unique
+  value                     String
+  backup_path               String?
+  backup_frequency          String?
+  backup_retention          Int?
+  backup_cloud_enabled      Boolean   @default(false)
+  backup_cloud_token        String?
+  backup_encryption_enabled Boolean   @default(false)
+  backup_password          String?
+  backup_time               String?
+  updated_at                DateTime  @updatedAt
+  deleted_at                DateTime?
 
   @@index([deleted_at])
   @@map("settings")
@@ -354,3 +365,39 @@ model Notification {
   @@index([read_at, created_at])
   @@map("notifications")
 }
+
+// ------------------------------------------
+// BackupHistory — Registro de execuções de backup
+// ------------------------------------------
+model BackupHistory {
+  id           String   @id @default(uuid())
+  createdAt    DateTime @default(now()) @map("created_at")
+  sizeBytes    Int      @map("size_bytes")
+  status       String   // success | error | pending
+  filePath     String   @map("file_path")
+  errorMessage String?  @map("error_message")
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("backup_history")
+}
+
+// ------------------------------------------
+// PixTransaction — Controle de transações PIX
+// ------------------------------------------
+model PixTransaction {
+  id                String    @id @default(uuid())
+  tx_id             String    @unique
+  amount_cents      Int
+  status            String    // pending | confirmed | failed | expired
+  created_at        DateTime  @default(now())
+  expires_at        DateTime
+  paid_at           DateTime?
+  paid_amount_cents Int?
+  updated_at        DateTime  @updatedAt
+
+  @@index([status])
+  @@index([created_at])
+  @@map("pix_transaction")
+}
+
