@@ -1,7 +1,8 @@
 import { CustomerRepository } from "../repositories/customer.repository.js";
 import { SettingsRepository } from "../repositories/settings.repository.js";
 import { NotificationService } from "../services/notification.service.js";
-import { NOTIFICATION_TYPES, NOTIFICATION_SEVERITIES } from "@pdv/shared";
+import { formatCents, NOTIFICATION_TYPES, NOTIFICATION_SEVERITIES } from "@pdv/shared";
+import { logInfo, logError } from "../utils/logger.js";
 
 const customerRepository = new CustomerRepository();
 const settingsRepository = new SettingsRepository();
@@ -30,18 +31,18 @@ export async function startCustomerDebtCheckJob(): Promise<void> {
     try {
       await runCustomerDebtCheck();
     } catch (error) {
-      console.error("Erro ao executar customer-debt-check job:", error);
+      logError("Erro ao executar customer-debt-check job", error);
     }
   }, TWENTY_FOUR_HOURS);
 
-  console.log("[Job] Customer debt check iniciado com interpretação diária");
+  logInfo("Customer debt check iniciado com interpretação diária", { tag: "Job" });
 }
 
 async function runCustomerDebtCheck(): Promise<void> {
   try {
     const result = await customerRepository.checkAndDeactivateOverdueCustomers();
     if (result.count > 0) {
-      console.log(`[Job] ${result.count} clientes foram inativados por atraso no pagamento`);
+      logInfo(`${result.count} clientes foram inativados por atraso no pagamento`, { tag: "Job" });
     }
 
     // Emitir notificações para clientes com fiado vencido e saldo em aberto
@@ -51,10 +52,10 @@ async function runCustomerDebtCheck(): Promise<void> {
         type: NOTIFICATION_TYPES.FIADO_OVERDUE,
         severity: NOTIFICATION_SEVERITIES.HIGH,
         title: `Fiado vencido: ${customer.name}`,
-        message: `O cliente "${customer.name}" possui saldo em aberto de ${customer.current_debt_cents / 100} com pagamento vencido.`,
+        message: `O cliente "${customer.name}" possui saldo em aberto de ${formatCents(customer.current_debt_cents)} com pagamento vencido.`,
         meta: JSON.stringify({ customerId: customer.id, redirectPath: "/customers" }),
         target_roles: ["admin", "manager"],
-      }).catch((err: unknown) => console.error("[Job] Erro ao criar notificação de fiado vencido:", err));
+      }).catch((err: unknown) => logError("Erro ao criar notificação de fiado vencido", err, { tag: "Job" }));
     }
 
     const dueDayAlertSetting = await settingsRepository.findByKey(FIADO_ALERT_ON_DUE_DAY_SETTING);
@@ -71,13 +72,13 @@ async function runCustomerDebtCheck(): Promise<void> {
         type: NOTIFICATION_TYPES.FIADO_DUE_DAY_DEBT_OPEN,
         severity: NOTIFICATION_SEVERITIES.HIGH,
         title: `Fiado vencendo hoje: ${customer.name}`,
-        message: `O cliente "${customer.name}" está no dia de vencimento com saldo em aberto de ${(customer.current_debt_cents / 100).toFixed(2)}.`,
+        message: `O cliente "${customer.name}" está no dia de vencimento com saldo em aberto de ${formatCents(customer.current_debt_cents)}.`,
         meta: JSON.stringify({ customerId: customer.id, redirectPath: "/customers" }),
         target_roles: ["admin", "manager"],
-      }).catch((err: unknown) => console.error("[Job] Erro ao criar notificação de fiado no vencimento:", err));
+      }).catch((err: unknown) => logError("Erro ao criar notificação de fiado no vencimento", err, { tag: "Job" }));
     }
   } catch (error) {
-    console.error("Erro ao verificar clientes em atraso:", error);
+    logError("Erro ao verificar clientes em atraso", error);
     throw error;
   }
 }

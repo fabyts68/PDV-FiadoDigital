@@ -2,6 +2,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import type { Server } from "http";
 import { wsTokenService } from "../services/ws-token.service.js";
 import type { AuthPayload } from "../middlewares/auth.middleware.js";
+import { logInfo, logError } from "../utils/logger.js";
 
 type WsMessage = {
   type: string;
@@ -37,24 +38,20 @@ export function initWebSocket(server: Server): void {
     (ws as AuthenticatedWs).user = payload;
 
     clients.add(ws);
-    console.log(
-      `[PDV WS] Cliente conectado. Total: ${clients.size}`,
-    );
+    logInfo(`Cliente conectado. Total: ${clients.size}`, { tag: "PDV WS" });
 
     ws.on("close", () => {
       clients.delete(ws);
-      console.log(
-        `[PDV WS] Cliente desconectado. Total: ${clients.size}`,
-      );
+      logInfo(`Cliente desconectado. Total: ${clients.size}`, { tag: "PDV WS" });
     });
 
     ws.on("error", (error) => {
-      console.error("[PDV WS] Erro:", error.message);
+      logError("Erro", error.message, { tag: "PDV WS" });
       clients.delete(ws);
     });
   });
 
-  console.log("[PDV WS] WebSocket inicializado em /ws");
+  logInfo("WebSocket inicializado em /ws", { tag: "PDV WS" });
 }
 
 export function broadcast(message: WsMessage): void {
