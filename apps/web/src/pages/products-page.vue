@@ -9,6 +9,7 @@ import { useConfirm } from "@/composables/use-confirm.js";
 import { useFormatting } from "@/composables/use-formatting.js";
 import { useToast } from "@/composables/use-toast.js";
 import { useAuthStore } from "@/stores/auth.store.js";
+import { useModalStack } from "@/composables/use-modal-stack.js";
 import { useProductStore } from "@/stores/product.store.js";
 
 type TabKey = "products" | "product-types" | "prices";
@@ -422,12 +423,9 @@ onMounted(async () => {
   if (!isAdmin.value && activeTab.value === "prices") {
     activeTab.value = "products";
   }
-
-  window.addEventListener("keydown", handleEscapeKey);
 });
 
 onUnmounted(() => {
-  window.removeEventListener("keydown", handleEscapeKey);
 });
 
 watch([productsPerPage, searchQuery], () => {
@@ -460,35 +458,7 @@ watch(
   },
 );
 
-function handleEscapeKey(event: KeyboardEvent): void {
-  if (event.key !== "Escape") {
-    return;
-  }
 
-  if (showSinglePriceModal.value) {
-    closeSinglePriceModal();
-    return;
-  }
-
-  if (showBulkPriceModal.value) {
-    closeBulkPriceModal();
-    return;
-  }
-
-  if (showProductModal.value) {
-    closeProductModal();
-    return;
-  }
-
-  if (showStockModal.value) {
-    closeStockModal();
-    return;
-  }
-
-  if (showProductTypeModal.value) {
-    closeProductTypeModal();
-  }
-}
 
 function showSuccessToast(message: string): void {
   toast(message);
@@ -1399,6 +1369,17 @@ function closeSinglePriceModal(): void {
   singlePriceError.value = null;
   singlePriceProduct.value = null;
 }
+
+useModalStack(
+  [
+    { isOpen: showProductModal, close: closeProductModal },
+    { isOpen: showStockModal, close: closeStockModal },
+    { isOpen: showProductTypeModal, close: closeProductTypeModal },
+    { isOpen: showBulkPriceModal, close: closeBulkPriceModal },
+    { isOpen: showSinglePriceModal, close: closeSinglePriceModal },
+  ],
+  { listenEscape: true },
+);
 
 function recalculateSaleFromMargin(): void {
   const costCents = parseCurrencyInputToCents(singleCostInput.value);

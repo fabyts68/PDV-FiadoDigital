@@ -291,17 +291,48 @@ onMounted(() => {
             ]"
             role="listitem"
           >
-            <div class="flex flex-wrap items-start gap-3">
-              <!-- Ícone e severidade -->
-              <div class="flex items-center gap-2">
-                <span class="text-xl leading-none select-none" aria-hidden="true">{{ severityIcon(notification.severity) }}</span>
-                <span :class="['text-xs font-bold', severityTextClass(notification.severity)]">
-                  {{ severityLabel(notification.severity) }}
-                </span>
+            <div class="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-start md:gap-3">
+              <!-- Linha 1 mobile: ícone/severidade + ações | Desktop: inline -->
+              <div class="flex items-center justify-between gap-2 md:contents">
+                <!-- Ícone e severidade -->
+                <div class="flex items-center gap-2">
+                  <span class="text-xl leading-none select-none" aria-hidden="true">{{ severityIcon(notification.severity) }}</span>
+                  <span :class="['text-xs font-bold', severityTextClass(notification.severity)]">
+                    {{ severityLabel(notification.severity) }}
+                  </span>
+                </div>
+
+                <!-- Ações (mobile: à direita do ícone | desktop: no final) -->
+                <div class="flex items-center gap-2 md:order-last">
+                  <RouterLink
+                    v-if="navigateMeta(notification)"
+                    :to="navigateMeta(notification)!"
+                    class="min-h-11 inline-flex items-center rounded border border-primary px-3 py-1 text-xs font-medium text-primary transition hover:bg-primary hover:text-white focus:outline-none"
+                    @click="handleMarkAsRead(notification)"
+                  >
+                    Ver
+                  </RouterLink>
+                  <button
+                    v-if="!notification.read_at"
+                    type="button"
+                    class="min-h-11 inline-flex items-center rounded border border-gray-300 px-3 py-1 text-xs text-gray-600 transition hover:bg-gray-100 focus:outline-none"
+                    @click="handleMarkAsRead(notification)"
+                  >
+                    Marcar lido
+                  </button>
+                  <button
+                    v-if="canAcknowledge && notification.severity === 'critical' && !notification.acknowledged_by"
+                    type="button"
+                    class="min-h-11 inline-flex items-center rounded border border-success px-3 py-1 text-xs font-medium text-success transition hover:bg-success hover:text-white focus:outline-none"
+                    @click="handleAcknowledge(notification)"
+                  >
+                    Confirmar
+                  </button>
+                </div>
               </div>
 
-              <!-- Conteúdo -->
-              <div class="flex-1 min-w-0">
+              <!-- Linha 2 mobile: conteúdo (largura total) | Desktop: flex-1 inline -->
+              <div class="min-w-0 md:flex-1">
                 <div class="flex flex-wrap items-center gap-2">
                   <p
                     class="text-sm font-semibold text-gray-900"
@@ -318,34 +349,6 @@ onMounted(() => {
                 </div>
                 <p class="mt-1 text-sm text-gray-600">{{ notification.message }}</p>
                 <p class="mt-1 text-xs text-gray-500">{{ formatRelativeTime(notification.created_at) }}</p>
-              </div>
-
-              <!-- Ações -->
-              <div class="flex flex-wrap items-center gap-2">
-                <RouterLink
-                  v-if="navigateMeta(notification)"
-                  :to="navigateMeta(notification)!"
-                  class="min-h-11 inline-flex items-center rounded border border-primary px-3 py-1 text-xs font-medium text-primary transition hover:bg-primary hover:text-white focus:outline-none"
-                  @click="handleMarkAsRead(notification)"
-                >
-                  Ver
-                </RouterLink>
-                <button
-                  v-if="!notification.read_at"
-                  type="button"
-                  class="min-h-11 inline-flex items-center rounded border border-gray-300 px-3 py-1 text-xs text-gray-600 transition hover:bg-gray-100 focus:outline-none"
-                  @click="handleMarkAsRead(notification)"
-                >
-                  Marcar lido
-                </button>
-                <button
-                  v-if="canAcknowledge && notification.severity === 'critical' && !notification.acknowledged_by"
-                  type="button"
-                  class="min-h-11 inline-flex items-center rounded border border-success px-3 py-1 text-xs font-medium text-success transition hover:bg-success hover:text-white focus:outline-none"
-                  @click="handleAcknowledge(notification)"
-                >
-                  Confirmar
-                </button>
               </div>
             </div>
           </li>

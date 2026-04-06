@@ -10,6 +10,7 @@ import { RecycleScroller } from "vue-virtual-scroller";
 import AppHeader from "@/components/layout/app-header.vue";
 import AppSidebar from "@/components/layout/app-sidebar.vue";
 import { useApi } from "@/composables/use-api.js";
+import { useModalStack } from "@/composables/use-modal-stack.js";
 import { useFormatting } from "@/composables/use-formatting.js";
 import { useToast } from "@/composables/use-toast.js";
 
@@ -631,6 +632,11 @@ function closeAdjustmentModal(): void {
   showAdjustmentModal.value = false;
   adjustmentError.value = null;
 }
+
+useModalStack([
+  { isOpen: showHistoryModal, close: closeHistoryModal },
+  { isOpen: showAdjustmentModal, close: closeAdjustmentModal },
+], { listenEscape: true });
 
 async function submitAdjustment(): Promise<void> {
   if (!historyProduct.value) {
