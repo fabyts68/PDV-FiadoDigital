@@ -1,6 +1,10 @@
 import { defineStore } from "pinia";
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
 import type { CreateSalePayload, SalePayment } from "@pdv/shared";
+import { generateUUID } from "@/utils/generate-uuid.js";
+import { useOfflineQueue } from "@/composables/use-offline-queue.js";
+import { useWebSocket } from "@/composables/use-websocket.js";
+import { useApi } from "@/composables/use-api.js";
 
 type CartItem = {
   product_id: string;
@@ -15,10 +19,32 @@ type CartItem = {
   stock_quantity: number;
 };
 
+const STORAGE_KEY = "pdv-sale-cart";
+
+function loadPersistedState(): { items: CartItem[]; discountCents: number; saleUuid: string | null } | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.items)) {
+      return {
+        items: parsed.items,
+        discountCents: typeof parsed.discountCents === "number" ? parsed.discountCents : 0,
+        saleUuid: parsed.saleUuid ?? null,
+      };
+    }
+  } catch {
+    // corrupted data — ignore
+  }
+  return null;
+}
+
 export const useSaleStore = defineStore("sale", () => {
-  const items = ref<CartItem[]>([]);
-  const discountCentsState = ref(0);
-  const saleUuid = ref<string | null>(null);
+  const persisted = loadPersistedState();
+
+  const items = ref<CartItem[]>(persisted?.items ?? []);
+  const discountCentsState = ref(persisted?.discountCents ?? 0);
+  const saleUuid = ref<string | null>(persisted?.saleUuid ?? null);
 
   const subtotalCents = computed(() =>
     items.value.reduce(
@@ -80,6 +106,7 @@ export const useSaleStore = defineStore("sale", () => {
     items.value = [];
     discountCentsState.value = 0;
     saleUuid.value = null;
+    localStorage.removeItem(STORAGE_KEY);
   }
 
   function applyChangeDiscount(cents: number): void {
@@ -103,7 +130,7 @@ export const useSaleStore = defineStore("sale", () => {
     finalTotalCents?: number,
   ): CreateSalePayload {
     return {
-      uuid: saleUuid.value ?? crypto.randomUUID(),
+      uuid: saleUuid.value ?? generateUUID(),
       terminal_id: terminalId,
       operator_id: operatorId,
       payment_method: paymentMethod as CreateSalePayload["payment_method"],
@@ -121,12 +148,44 @@ export const useSaleStore = defineStore("sale", () => {
     };
   }
 
+  function persistState(): void {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        items: items.value,
+        discountCents: discountCentsState.value,
+        saleUuid: saleUuid.value,
+      }),
+    );
+  }
+
+  watch([items, discountCentsState, saleUuid], persistState, { deep: true });
+
+  const { enqueue, queueLength, isSyncing } = useOfflineQueue();
+  const { isOnline } = useWebSocket();
+  const { authenticatedFetch } = useApi();
+
+  async function createSale(payload: CreateSalePayload) {
+    if (!isOnline.value) {
+      enqueue(payload);
+      return { ok: true, status: 202, offline: true, payload };
+    }
+
+    return authenticatedFetch("/api/sales", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
   return {
     items,
     discountCents,
     saleUuid,
     subtotalCents,
     totalCents,
+    queueLength,
+    isSyncing,
     addItem,
     removeItem,
     updateItemQuantity,
@@ -134,5 +193,6 @@ export const useSaleStore = defineStore("sale", () => {
     applyChangeDiscount,
     removeChangeDiscount,
     buildPayload,
+    createSale,
   };
 });

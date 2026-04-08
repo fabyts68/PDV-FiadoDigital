@@ -16,6 +16,11 @@ const navItems: NavItem[] = [
   { label: "Funcionários", to: "/employees", roles: ["admin", "manager"] },
   { label: "Controle", to: "/control", roles: ["admin"] },
   { label: "Notificações", to: "/notifications", roles: ["admin", "manager", "operator"] },
+  {
+    label: "Acesso Smartphone",
+    to: "/smartphone-access",
+    roles: ["admin", "manager", "operator"],
+  },
   { label: "Configurações", to: "/settings", roles: ["admin"] },
 ];
 
@@ -43,7 +48,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <aside class="hidden w-56 border-r bg-white md:block">
+  <aside class="hidden w-56 border-r bg-white 2xl:block">
     <nav class="flex flex-col gap-1 p-4" aria-label="Menu principal">
       <RouterLink
         v-for="item in visibleItems"
@@ -59,13 +64,13 @@ onUnmounted(() => {
 
   <div
     v-if="mobileMenuOpen"
-    class="fixed inset-0 z-40 bg-black/50 md:hidden"
+    class="fixed inset-0 z-40 bg-black/50 2xl:hidden"
     @click="closeMobileMenu"
   ></div>
 
   <aside
     :class="[
-      'fixed inset-y-0 left-0 z-50 w-64 border-r bg-white transition-transform duration-200 md:hidden',
+      'fixed inset-y-0 left-0 z-50 w-64 border-r bg-white transition-transform duration-200 2xl:hidden',
       mobileMenuOpen ? 'translate-x-0' : '-translate-x-full',
     ]"
     role="navigation"

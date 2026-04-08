@@ -2,8 +2,10 @@
 import { computed, onMounted, ref, watch } from "vue";
 import AppHeader from "@/components/layout/app-header.vue";
 import AppSidebar from "@/components/layout/app-sidebar.vue";
+import ConfirmDialog from "@/components/layout/confirm-dialog.vue";
 import NotificationToastContainer from "@/components/layout/notification-toast-container.vue";
 import { useNotifications, type NotificationFilters } from "@/composables/use-notifications.js";
+import { useConfirm } from "@/composables/use-confirm.js";
 import { useAuthStore } from "@/stores/auth.store.js";
 import type { Notification } from "@pdv/shared";
 
@@ -28,7 +30,18 @@ const {
   markAllRead,
   acknowledge,
   exportCsv,
+  deleteRead,
 } = useNotifications();
+
+const {
+  showConfirm,
+  confirmTitle,
+  confirmMessage,
+  confirmLabel,
+  confirm,
+  onConfirm,
+  onCancel,
+} = useConfirm();
 
 const activeTab = ref<TabKey>("all");
 const searchQuery = ref("");
@@ -90,6 +103,19 @@ async function handleAcknowledge(notification: Notification): Promise<void> {
 
 async function handleMarkAllRead(): Promise<void> {
   await markAllRead();
+  await loadNotifications();
+}
+
+async function handleDeleteRead(): Promise<void> {
+  const isConfirmed = await confirm({
+    title: "Apagar Lidas",
+    message: "Tem certeza que deseja apagar todas as notificações lidas? Esta ação não pode ser desfeita.",
+    confirmLabel: "Apagar tudo",
+  });
+
+  if (!isConfirmed) return;
+
+  await deleteRead();
   await loadNotifications();
 }
 
@@ -158,6 +184,14 @@ onMounted(() => {
   <div class="flex min-h-screen flex-col bg-surface">
     <AppHeader />
     <NotificationToastContainer />
+    <ConfirmDialog
+      :open="showConfirm"
+      :title="confirmTitle"
+      :message="confirmMessage"
+      :confirm-label="confirmLabel"
+      @confirm="onConfirm"
+      @cancel="onCancel"
+    />
 
     <div class="flex flex-1">
       <AppSidebar />
@@ -166,14 +200,24 @@ onMounted(() => {
         <!-- Cabeçalho da página -->
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h1 class="text-xl font-bold text-gray-900">Notificações</h1>
-          <button
-            v-if="canAcknowledge"
-            type="button"
-            class="rounded bg-primary px-4 py-2 text-sm font-medium text-white transition hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-primary"
-            @click="handleExport"
-          >
-            Exportar CSV
-          </button>
+          <div class="flex items-center gap-2">
+            <button
+              v-if="canAcknowledge"
+              type="button"
+              class="rounded bg-primary px-4 py-2 text-sm font-medium text-white transition hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-primary"
+              @click="handleExport"
+            >
+              Exportar CSV
+            </button>
+            <button
+              v-if="canAcknowledge"
+              type="button"
+              class="rounded bg-danger/90 px-3 py-2 text-sm font-medium text-white transition hover:bg-danger-dark focus:outline-none focus:ring-2 focus:ring-danger"
+              @click="handleDeleteRead"
+            >
+              Apagar lidas
+            </button>
+          </div>
         </div>
 
         <!-- Abas de filtro -->
@@ -247,17 +291,48 @@ onMounted(() => {
             ]"
             role="listitem"
           >
-            <div class="flex flex-wrap items-start gap-3">
-              <!-- Ícone e severidade -->
-              <div class="flex items-center gap-2">
-                <span class="text-xl leading-none select-none" aria-hidden="true">{{ severityIcon(notification.severity) }}</span>
-                <span :class="['text-xs font-bold', severityTextClass(notification.severity)]">
-                  {{ severityLabel(notification.severity) }}
-                </span>
+            <div class="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-start md:gap-3">
+              <!-- Linha 1 mobile: ícone/severidade + ações | Desktop: inline -->
+              <div class="flex items-center justify-between gap-2 md:contents">
+                <!-- Ícone e severidade -->
+                <div class="flex items-center gap-2">
+                  <span class="text-xl leading-none select-none" aria-hidden="true">{{ severityIcon(notification.severity) }}</span>
+                  <span :class="['text-xs font-bold', severityTextClass(notification.severity)]">
+                    {{ severityLabel(notification.severity) }}
+                  </span>
+                </div>
+
+                <!-- Ações (mobile: à direita do ícone | desktop: no final) -->
+                <div class="flex items-center gap-2 md:order-last">
+                  <RouterLink
+                    v-if="navigateMeta(notification)"
+                    :to="navigateMeta(notification)!"
+                    class="min-h-11 inline-flex items-center rounded border border-primary px-3 py-1 text-xs font-medium text-primary transition hover:bg-primary hover:text-white focus:outline-none"
+                    @click="handleMarkAsRead(notification)"
+                  >
+                    Ver
+                  </RouterLink>
+                  <button
+                    v-if="!notification.read_at"
+                    type="button"
+                    class="min-h-11 inline-flex items-center rounded border border-gray-300 px-3 py-1 text-xs text-gray-600 transition hover:bg-gray-100 focus:outline-none"
+                    @click="handleMarkAsRead(notification)"
+                  >
+                    Marcar lido
+                  </button>
+                  <button
+                    v-if="canAcknowledge && notification.severity === 'critical' && !notification.acknowledged_by"
+                    type="button"
+                    class="min-h-11 inline-flex items-center rounded border border-success px-3 py-1 text-xs font-medium text-success transition hover:bg-success hover:text-white focus:outline-none"
+                    @click="handleAcknowledge(notification)"
+                  >
+                    Confirmar
+                  </button>
+                </div>
               </div>
 
-              <!-- Conteúdo -->
-              <div class="flex-1 min-w-0">
+              <!-- Linha 2 mobile: conteúdo (largura total) | Desktop: flex-1 inline -->
+              <div class="min-w-0 md:flex-1">
                 <div class="flex flex-wrap items-center gap-2">
                   <p
                     class="text-sm font-semibold text-gray-900"
@@ -274,34 +349,6 @@ onMounted(() => {
                 </div>
                 <p class="mt-1 text-sm text-gray-600">{{ notification.message }}</p>
                 <p class="mt-1 text-xs text-gray-500">{{ formatRelativeTime(notification.created_at) }}</p>
-              </div>
-
-              <!-- Ações -->
-              <div class="flex flex-wrap items-center gap-2">
-                <RouterLink
-                  v-if="navigateMeta(notification)"
-                  :to="navigateMeta(notification)!"
-                  class="min-h-11 inline-flex items-center rounded border border-primary px-3 py-1 text-xs font-medium text-primary transition hover:bg-primary hover:text-white focus:outline-none"
-                  @click="handleMarkAsRead(notification)"
-                >
-                  Ver
-                </RouterLink>
-                <button
-                  v-if="!notification.read_at"
-                  type="button"
-                  class="min-h-11 inline-flex items-center rounded border border-gray-300 px-3 py-1 text-xs text-gray-600 transition hover:bg-gray-100 focus:outline-none"
-                  @click="handleMarkAsRead(notification)"
-                >
-                  Marcar lido
-                </button>
-                <button
-                  v-if="canAcknowledge && notification.severity === 'critical' && !notification.acknowledged_by"
-                  type="button"
-                  class="min-h-11 inline-flex items-center rounded border border-success px-3 py-1 text-xs font-medium text-success transition hover:bg-success hover:text-white focus:outline-none"
-                  @click="handleAcknowledge(notification)"
-                >
-                  Confirmar
-                </button>
               </div>
             </div>
           </li>

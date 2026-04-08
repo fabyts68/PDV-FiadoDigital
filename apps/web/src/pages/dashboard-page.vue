@@ -7,6 +7,7 @@ import AppSidebar from "@/components/layout/app-sidebar.vue";
 import { useApi } from "@/composables/use-api.js";
 import { useNotifications } from "@/composables/use-notifications.js";
 import { useWebSocket } from "@/composables/use-websocket.js";
+import { useModalStack } from "@/composables/use-modal-stack.js";
 import { useAuthStore } from "@/stores/auth.store.js";
 import TrendBadge from "@/components/dashboard/TrendBadge.vue";
 import PaymentDonutChart from "@/components/dashboard/PaymentDonutChart.vue";
@@ -19,7 +20,7 @@ interface OverdueCustomer {
   payment_due_day: number | null;
 }
 
-type PeriodPreset = "today" | "yesterday" | "week" | "month";
+type PeriodPreset = "today" | "yesterday" | "week" | "month" | "custom";
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -48,13 +49,53 @@ const viewMode = ref<"manager" | "operator">("manager");
 const periodPresets: Array<{ value: PeriodPreset; label: string }> = [
   { value: "today",     label: "Hoje" },
   { value: "yesterday", label: "Ontem" },
-  { value: "week",      label: "Últimos 7 dias" },
-  { value: "month",     label: "Este mês" },
+  { value: "week",      label: "Semana Atual" },
+  { value: "month",     label: "Mês Atual" },
 ];
 
 const activePeriod = ref<PeriodPreset>(
   (localStorage.getItem("dashboard_period") as PeriodPreset | null) ?? "today",
 );
+
+const customStartDate = ref("");
+const customEndDate = ref("");
+
+const periodDateRange = computed<{ startDate: string; endDate: string }>(() => {
+  const now = new Date();
+
+  switch (activePeriod.value) {
+    case "today": {
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+      return { startDate: start.toISOString(), endDate: end.toISOString() };
+    }
+    case "yesterday": {
+      const yesterday = new Date(now);
+      yesterday.setDate(yesterday.getDate() - 1);
+      const start = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 0, 0, 0);
+      const end = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 23, 59, 59);
+      return { startDate: start.toISOString(), endDate: end.toISOString() };
+    }
+    case "week": {
+      const dayOfWeek = now.getDay(); // 0 = Sunday
+      const sunday = new Date(now);
+      sunday.setDate(now.getDate() - dayOfWeek);
+      const start = new Date(sunday.getFullYear(), sunday.getMonth(), sunday.getDate(), 0, 0, 0);
+      const saturday = new Date(sunday);
+      saturday.setDate(sunday.getDate() + 6);
+      const end = new Date(saturday.getFullYear(), saturday.getMonth(), saturday.getDate(), 23, 59, 59);
+      return { startDate: start.toISOString(), endDate: end.toISOString() };
+    }
+    case "month": {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+      return { startDate: start.toISOString(), endDate: end.toISOString() };
+    }
+    case "custom": {
+      return { startDate: customStartDate.value, endDate: customEndDate.value };
+    }
+  }
+});
 
 const formattedDate = computed(() => {
   return new Date().toLocaleDateString("pt-BR", {
@@ -69,12 +110,20 @@ const fiadoTodayCents = computed(() => {
   return summary.value?.financial.by_payment_method.fiado ?? 0;
 });
 
+const paymentMethodsTotal = computed(() => {
+  const methods = summary.value?.financial.by_payment_method ?? {};
+  return Object.values(methods).reduce((sum, val) => sum + (val as number), 0);
+});
+
 const periodLabel = computed<string>(() => {
   const map: Record<PeriodPreset, string> = {
     today:     "hoje",
     yesterday: "ontem",
-    week:      "nos últimos 7 dias",
-    month:     "neste mês",
+    week:      "na semana atual",
+    month:     "no mês atual",
+    custom:    customStartDate.value && customEndDate.value
+      ? `de ${new Date(customStartDate.value).toLocaleDateString("pt-BR")} a ${new Date(customEndDate.value).toLocaleDateString("pt-BR")}`
+      : "no período selecionado",
   };
   return map[activePeriod.value];
 });
@@ -136,12 +185,19 @@ function openChargeModal(customer: OverdueCustomer): void {
   showChargeModal.value = true;
 }
 
+function closeChargeModal(): void {
+  showChargeModal.value = false;
+  selectedCustomer.value = null;
+}
+
+useModalStack([{ isOpen: showChargeModal, close: closeChargeModal }]);
+
 function goToPayment(): void {
   if (!selectedCustomer.value) {
     return;
   }
 
-  showChargeModal.value = false;
+  closeChargeModal();
   router.push({
     name: "customers",
     query: {
@@ -212,11 +268,18 @@ function handleDrillDown(method: string): void {
 }
 
 async function loadDashboard(): Promise<void> {
+  if (activePeriod.value === "custom" && (!customStartDate.value || !customEndDate.value)) {
+    return;
+  }
+
   isLoading.value = true;
   hasError.value = false;
 
   try {
-    const response = await authenticatedFetch(`/api/dashboard-summary?preset=${activePeriod.value}`);
+    const { startDate, endDate } = periodDateRange.value;
+    const response = await authenticatedFetch(
+      `/api/dashboard-summary?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`,
+    );
     const json = (await response.json()) as { success: boolean; data: DashboardSummary };
 
     if (!response.ok || !json.success) {
@@ -304,8 +367,7 @@ onMounted(async () => {
 
 onBeforeRouteLeave(() => {
   sessionStorage.removeItem(cacheKey.value);
-  showChargeModal.value = false;
-  selectedCustomer.value = null;
+  closeChargeModal();
 });
 
 onUnmounted(() => {
@@ -321,7 +383,6 @@ onUnmounted(() => {
       <main class="min-w-0 flex-1 px-3 py-4 sm:px-4 md:px-6 md:py-6">
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 class="text-2xl font-bold text-gray-900">Visão Geral</h1>
             <p class="text-sm text-gray-500">{{ formattedDate }}</p>
           </div>
           <div class="flex items-center gap-2">
@@ -351,9 +412,9 @@ onUnmounted(() => {
         </div>
 
         <!-- Melhoria 5: barra de filtro de período -->
-        <div class="mb-6 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap" role="group" aria-label="Filtro de período">
+        <div class="mb-6 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center" role="group" aria-label="Filtro de período">
           <button
-            v-for="preset in periodPresets"
+            v-for="preset in periodPresets.filter((p) => p.value !== 'custom')"
             :key="preset.value"
             type="button"
             class="min-h-11 w-full rounded-lg px-4 py-2 text-sm font-medium transition-colors sm:w-auto"
@@ -363,6 +424,26 @@ onUnmounted(() => {
           >
             {{ preset.label }}
           </button>
+
+          <div class="col-span-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <input
+              type="date"
+              v-model="customStartDate"
+              class="min-h-11 w-full rounded-lg border bg-white px-3 py-2 text-sm text-gray-700 transition-colors focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary sm:w-auto"
+              :class="activePeriod === 'custom' ? 'border-primary ring-1 ring-primary' : ''"
+              aria-label="Data inicial personalizada"
+              @change="activePeriod = 'custom'; loadDashboard();"
+            />
+            <span class="hidden text-xs text-gray-400 sm:inline">até</span>
+            <input
+              type="date"
+              v-model="customEndDate"
+              class="min-h-11 w-full rounded-lg border bg-white px-3 py-2 text-sm text-gray-700 transition-colors focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary sm:w-auto"
+              :class="activePeriod === 'custom' ? 'border-primary ring-1 ring-primary' : ''"
+              aria-label="Data final personalizada"
+              @change="activePeriod = 'custom'; loadDashboard();"
+            />
+          </div>
         </div>
 
         <div
@@ -533,9 +614,12 @@ onUnmounted(() => {
 
           <div v-if="viewMode === 'manager'" class="mb-6 grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-3">
             <div class="rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100 lg:col-span-2">
-              <h2 class="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">
-                Como entrou o dinheiro {{ periodLabel }}
-              </h2>
+              <div class="mb-4 flex items-center justify-between">
+                <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500">Formas de pagamento</h2>
+                <span v-if="!isLoading" class="rounded-full bg-gray-100 px-3 py-1 text-sm font-semibold text-gray-800">
+                  {{ showMonetaryValues ? formatCents(paymentMethodsTotal) : 'R$ ••••' }}
+                </span>
+              </div>
               <div v-if="isLoading" class="flex gap-4">
                 <span class="skeleton h-32 w-32 rounded-full" />
                 <div class="flex flex-col justify-center gap-2">
@@ -678,7 +762,7 @@ onUnmounted(() => {
           <div
             v-if="showChargeModal"
             class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-            @click.self="showChargeModal = false"
+            @click.self="closeChargeModal"
             role="dialog"
             aria-modal="true"
             :aria-labelledby="'charge-modal-title'"
@@ -706,7 +790,7 @@ onUnmounted(() => {
                   Registrar pagamento
                 </button>
                 <button
-                  @click="showChargeModal = false"
+                  @click="closeChargeModal"
                   class="min-h-11 w-full rounded-xl border py-3 text-sm font-medium text-gray-600"
                 >
                   Fechar

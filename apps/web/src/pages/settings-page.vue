@@ -1,18 +1,31 @@
 <script setup lang="ts">
 import type { CardMachine } from "@pdv/shared";
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import AppHeader from "@/components/layout/app-header.vue";
 import AppSidebar from "@/components/layout/app-sidebar.vue";
 import ConfirmDialog from "@/components/layout/confirm-dialog.vue";
 import { useApi } from "@/composables/use-api.js";
 import { useConfirm } from "@/composables/use-confirm.js";
 import { useFormatting } from "@/composables/use-formatting.js";
+import { useModalStack } from "@/composables/use-modal-stack.js";
+import { useSettingsDomain } from "@/composables/use-settings-domain.js";
 import { useToast } from "@/composables/use-toast.js";
 import { useAuthStore } from "@/stores/auth.store.js";
 
 type PixKeyType = "cpf" | "cnpj" | "email" | "phone" | "random";
-type MainTabKey = "settings" | "payment-methods" | "alerts";
-type PaymentTabKey = "pix" | "card-machines" | "fiado" | "whatsapp" | "change-discount";
+type MainTabKey = "settings" | "payment-methods" | "alerts" | "backup";
+type PaymentTabKey = "pix" | "card-machines" | "fiado" | "change-discount";
+type AlertsTabKey = "stock" | "whatsapp" | "fiado";
+type BackupFrequency = "daily" | "weekly" | "monthly";
+
+interface BackupHistoryEntry {
+  id: string;
+  createdAt: string;
+  sizeBytes: number;
+  status: "success" | "error" | "pending";
+  filePath: string;
+  errorMessage?: string | null;
+}
 
 interface CardMachineFormData {
   name: string;
@@ -75,9 +88,21 @@ interface GeneralSettingsResponse {
   fiado_alert_on_due_day: boolean;
   whatsapp_message_fiado_vencido: string;
   whatsapp_message_fiado_a_vencer: string;
+  whatsapp_due_partial_message?: string;
+  whatsapp_overdue_partial_message?: string;
   stock_alert_type_settings: Record<string, number>;
   stock_alert_type_pct_settings?: Record<string, number>;
+  backup_path?: string;
+  backup_frequency?: BackupFrequency;
+  backup_retention?: number;
+  backup_cloud_enabled?: boolean;
+  backup_cloud_token?: string;
+  backup_encryption_enabled?: boolean;
+  backup_password?: string;
+  backup_time?: string;
 }
+
+type PendingPasswordAction = "pix" | "backup";
 
 interface ProductTypeOption {
   id: string;
@@ -89,12 +114,14 @@ interface ProductStockUnitInfo {
   is_bulk: boolean;
 }
 
-type WhatsAppTemplateField = "whatsapp_message_fiado_vencido" | "whatsapp_message_fiado_a_vencer";
+type WhatsAppTemplateField = "whatsapp_message_fiado_vencido" | "whatsapp_message_fiado_a_vencer" | "whatsapp_due_partial_message" | "whatsapp_overdue_partial_message";
 
 const { authenticatedFetch } = useApi();
 const authStore = useAuthStore();
 const activeMainTab = ref<MainTabKey>("settings");
 const activePaymentTab = ref<PaymentTabKey>("pix");
+const activeAlertsTab = ref<AlertsTabKey>("stock");
+const activeWhatsappTemplate = ref<WhatsAppTemplateField>("whatsapp_message_fiado_vencido");
 
 const pixKeyTypeOptions: Array<{ value: PixKeyType; label: string }> = [
   { value: "cpf", label: "CPF" },
@@ -124,6 +151,49 @@ const whatsappSubmitError = ref<string | null>(null);
 const alertsSaving = ref(false);
 const alertsSubmitError = ref<string | null>(null);
 
+const backupForm = ref({
+  backup_path: "/var/backups/pdv",
+  backup_frequency: "daily" as BackupFrequency,
+  backup_retention: "7",
+  backup_cloud_enabled: false,
+  backup_cloud_token: "",
+  backup_encryption_enabled: false,
+  backup_password: "",
+  backup_time: "03:00",
+});
+const backupSaving = ref(false);
+const backupSubmitError = ref<string | null>(null);
+const pendingPasswordAction = ref<PendingPasswordAction>("pix");
+const backupCloudKeyVisible = ref(false);
+const backupPasswordVisible = ref(false);
+const backupGenerating = ref(false);
+const backupHistoryPage = ref(1);
+const BACKUP_HISTORY_PAGE_SIZE = 5;
+
+const showRestoreModal = ref(false);
+const restoreScope = ref("full");
+const restoreFile = ref<File | null>(null);
+const restorePassword = ref("");
+
+const backupHistory = ref<BackupHistoryEntry[]>([]);
+const backupHistoryLoading = ref(false);
+const backupHistoryError = ref<string | null>(null);
+
+const backupCloudStatus = computed(() =>
+  backupForm.value.backup_cloud_enabled && backupForm.value.backup_cloud_token.trim()
+    ? "connected"
+    : "not-configured",
+);
+
+const totalBackupHistoryPages = computed(() =>
+  Math.max(1, Math.ceil(backupHistory.value.length / BACKUP_HISTORY_PAGE_SIZE)),
+);
+
+const paginatedBackupHistory = computed(() => {
+  const start = (backupHistoryPage.value - 1) * BACKUP_HISTORY_PAGE_SIZE;
+  return backupHistory.value.slice(start, start + BACKUP_HISTORY_PAGE_SIZE);
+});
+
 const systemForm = ref({
   store_name: "",
   store_cnpj: "",
@@ -144,6 +214,8 @@ const fiadoForm = ref({
 const whatsappForm = ref({
   whatsapp_message_fiado_vencido: "",
   whatsapp_message_fiado_a_vencer: "",
+  whatsapp_due_partial_message: "",
+  whatsapp_overdue_partial_message: "",
 });
 
 const alertsForm = ref({
@@ -171,7 +243,21 @@ const modalError = ref<string | null>(null);
 
 const { showToast, toastMessage, toastType, toast } = useToast();
 const { showConfirm, confirmTitle, confirmMessage, confirmLabel, confirm, onConfirm, onCancel } = useConfirm();
-const { formatPhoneForInput, parseCurrencyInputToCents } = useFormatting();
+const {
+  normalizeDigits,
+  formatCpfForInput,
+  formatCnpjForInput,
+  formatPhoneForInput,
+  formatCurrencyInput,
+  parseCurrencyInputToNullableCents,
+  formatWeightInput,
+  parseWeightInputToNullableKg,
+  formatFileSize,
+  formatStoredPixKeyForDisplay,
+  formatDateTimeForDisplay,
+  displayPercent,
+} = useFormatting();
+const { sanitizePixKeyInput, validatePixKey, parseRateInput } = useSettingsDomain();
 
 const cardMachines = ref<CardMachine[]>([]);
 const loadingCardMachines = ref(false);
@@ -198,6 +284,8 @@ const currentAdminName = computed(() => authStore.user?.name?.trim() || "Adminis
 const isCardMachinesTab = computed(() => activePaymentTab.value === "card-machines");
 const whatsappVencidoTextarea = ref<HTMLTextAreaElement | null>(null);
 const whatsappAVencerTextarea = ref<HTMLTextAreaElement | null>(null);
+const whatsappDuePartialTextarea = ref<HTMLTextAreaElement | null>(null);
+const whatsappOverduePartialTextarea = ref<HTMLTextAreaElement | null>(null);
 const whatsappTokenButtons = [
   { label: "+ Nome do Cliente", token: "[NOME]" },
   { label: "+ Valor Total", token: "[TOTAL]" },
@@ -209,6 +297,10 @@ const whatsappMessageDefaults: Record<WhatsAppTemplateField, string> = {
     "Olá [NOME], notamos que o seu fiado de [TOTAL] venceu em [VENCIMENTO]. Como podemos te ajudar a regularizar?",
   whatsapp_message_fiado_a_vencer:
     "Olá [NOME], passando para lembrar que o seu fiado de [TOTAL] vence em [VENCIMENTO]. Se precisar, estamos à disposição.",
+  whatsapp_due_partial_message:
+    "Olá [NOME], passando para lembrar que o seu fiado de [TOTAL] vence em [VENCIMENTO]. Sua cobrança atual é de [COBRANCA]. Se precisar, estamos à disposição.",
+  whatsapp_overdue_partial_message:
+    "Olá [NOME], notamos que o seu fiado de [TOTAL] venceu em [VENCIMENTO]. Falta um pagamento de [COBRANCA]. Como podemos te ajudar a regularizar?",
 };
 const whatsappPreviewValues: Record<string, string> = {
   "[NOME]": "Fulano",
@@ -225,6 +317,14 @@ const whatsappPreviewAVencer = computed(() =>
   buildWhatsappPreview(whatsappForm.value.whatsapp_message_fiado_a_vencer, "whatsapp_message_fiado_a_vencer"),
 );
 
+const whatsappPreviewDuePartial = computed(() =>
+  buildWhatsappPreview(whatsappForm.value.whatsapp_due_partial_message, "whatsapp_due_partial_message"),
+);
+
+const whatsappPreviewOverduePartial = computed(() =>
+  buildWhatsappPreview(whatsappForm.value.whatsapp_overdue_partial_message, "whatsapp_overdue_partial_message"),
+);
+
 const ratePreviewItems = computed(() => {
   const baseRate = parseRateInput(cardMachineFormData.value.rates.credit_base_rate);
   const incrementalRate = parseRateInput(cardMachineFormData.value.rates.credit_incremental_rate);
@@ -239,7 +339,7 @@ const ratePreviewItems = computed(() => {
     const rate = baseRate + (n - 1) * incrementalRate;
     return {
       installments: n,
-      rateLabel: rate.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+      rateLabel: displayPercent(rate, 2),
     };
   });
 });
@@ -301,210 +401,10 @@ onMounted(async () => {
   await loadGeneralSettings();
   await loadPixSettings();
   await loadCardMachines();
-  window.addEventListener("keydown", handleEscapeKey);
+  await loadBackupHistory();
 });
 
-onUnmounted(() => {
-  window.removeEventListener("keydown", handleEscapeKey);
-});
 
-function handleEscapeKey(event: KeyboardEvent): void {
-  if (event.key !== "Escape") {
-    return;
-  }
-
-  if (showConfirm.value) {
-    onCancel();
-    return;
-  }
-
-  if (showCardMachineModal.value && !cardMachineSubmitLoading.value) {
-    closeCardMachineModal();
-    return;
-  }
-
-  if (!showPasswordModal.value || loadingSubmit.value) {
-    return;
-  }
-
-  closePasswordModal();
-}
-
-function normalizeDigits(value: string): string {
-  return value.replace(/\D/g, "");
-}
-
-function formatCpfForInput(value: string): string {
-  const digits = normalizeDigits(value).slice(0, 11);
-
-  if (digits.length <= 3) {
-    return digits;
-  }
-
-  if (digits.length <= 6) {
-    return `${digits.slice(0, 3)}.${digits.slice(3)}`;
-  }
-
-  if (digits.length <= 9) {
-    return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6)}`;
-  }
-
-  return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
-}
-
-function formatCnpjForInput(value: string): string {
-  const digits = normalizeDigits(value).slice(0, 14);
-
-  if (digits.length <= 2) {
-    return digits;
-  }
-
-  if (digits.length <= 5) {
-    return `${digits.slice(0, 2)}.${digits.slice(2)}`;
-  }
-
-  if (digits.length <= 8) {
-    return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5)}`;
-  }
-
-  if (digits.length <= 12) {
-    return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8)}`;
-  }
-
-  return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
-}
-
-function formatStoredPixKeyForDisplay(type: PixKeyType | "", value: string): string {
-  if (type === "cpf") {
-    return formatCpfForInput(value);
-  }
-
-  if (type === "cnpj") {
-    return formatCnpjForInput(value);
-  }
-
-  if (type === "phone") {
-    return formatPhoneForInput(value);
-  }
-
-  return value;
-}
-
-function sanitizePixKeyInput(type: PixKeyType | "", value: string): string {
-  const trimmedValue = value.trim();
-
-  if (type === "cpf" || type === "cnpj" || type === "phone") {
-    return normalizeDigits(trimmedValue);
-  }
-
-  return trimmedValue;
-}
-
-function isValidCpf(value: string): boolean {
-  const digits = normalizeDigits(value);
-
-  if (!/^\d{11}$/.test(digits)) {
-    return false;
-  }
-
-  if (/^(\d)\1{10}$/.test(digits)) {
-    return false;
-  }
-
-  let sum = 0;
-
-  for (let index = 0; index < 9; index += 1) {
-    sum += Number(digits[index]) * (10 - index);
-  }
-
-  const firstDigit = (sum * 10) % 11;
-
-  if ((firstDigit === 10 ? 0 : firstDigit) !== Number(digits[9])) {
-    return false;
-  }
-
-  sum = 0;
-
-  for (let index = 0; index < 10; index += 1) {
-    sum += Number(digits[index]) * (11 - index);
-  }
-
-  const secondDigit = (sum * 10) % 11;
-
-  return (secondDigit === 10 ? 0 : secondDigit) === Number(digits[10]);
-}
-
-function isValidCnpj(value: string): boolean {
-  const digits = normalizeDigits(value);
-
-  if (!/^\d{14}$/.test(digits)) {
-    return false;
-  }
-
-  if (/^(\d)\1{13}$/.test(digits)) {
-    return false;
-  }
-
-  const calculateDigit = (base: string, factors: number[]): number => {
-    const total = base
-      .split("")
-      .reduce((sum, digit, index) => sum + Number(digit) * (factors[index] ?? 0), 0);
-    const remainder = total % 11;
-    return remainder < 2 ? 0 : 11 - remainder;
-  };
-
-  const firstDigit = calculateDigit(digits.slice(0, 12), [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
-
-  if (firstDigit !== Number(digits[12])) {
-    return false;
-  }
-
-  const secondDigit = calculateDigit(digits.slice(0, 13), [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
-
-  return secondDigit === Number(digits[13]);
-}
-
-function isValidEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-}
-
-function isValidUuidV4(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.trim());
-}
-
-function validatePixKey(type: PixKeyType | "", rawValue: string): string[] | undefined {
-  if (!type) {
-    return ["Selecione o tipo de chave Pix."];
-  }
-
-  const normalizedValue = sanitizePixKeyInput(type, rawValue);
-
-  if (!normalizedValue) {
-    return ["Chave Pix é obrigatória."];
-  }
-
-  if (type === "cpf" && !isValidCpf(normalizedValue)) {
-    return ["Informe um CPF válido com 11 dígitos."];
-  }
-
-  if (type === "cnpj" && !isValidCnpj(normalizedValue)) {
-    return ["Informe um CNPJ válido com 14 dígitos."];
-  }
-
-  if (type === "email" && !isValidEmail(normalizedValue)) {
-    return ["Informe um e-mail válido."];
-  }
-
-  if (type === "phone" && !/^\d{11}$/.test(normalizedValue)) {
-    return ["Informe um telefone válido com DDD e 9 dígitos."];
-  }
-
-  if (type === "random" && !isValidUuidV4(normalizedValue)) {
-    return ["Informe uma chave aleatória válida no formato UUID v4."];
-  }
-
-  return undefined;
-}
 
 function handleStoreCnpjInput(event: Event): void {
   const target = event.target as HTMLInputElement;
@@ -521,7 +421,7 @@ function handleDiscountLimitInput(
   field: "discount_limit_daily" | "discount_limit_weekly" | "discount_limit_monthly",
 ): void {
   const target = event.target as HTMLInputElement;
-  systemForm.value[field] = toCurrencyMaskedValue(target.value);
+  systemForm.value[field] = formatCurrencyInput(target.value);
 }
 
 function handleFiadoMaxDaysInput(event: Event): void {
@@ -536,72 +436,24 @@ function handleAlertStockMinUnitsInput(event: Event): void {
 
 function handleAlertStockMinBulkKgInput(event: Event): void {
   const target = event.target as HTMLInputElement;
-  alertsForm.value.stock_alert_min_bulk_kg = toWeightMaskedValue(target.value);
+  alertsForm.value.stock_alert_min_bulk_kg = formatWeightInput(target.value);
 }
 
 function handleAlertCashRegisterInput(event: Event): void {
   const target = event.target as HTMLInputElement;
-  alertsForm.value.cash_register_alert_amount_cents = toCurrencyMaskedValue(target.value);
+  alertsForm.value.cash_register_alert_amount_cents = formatCurrencyInput(target.value);
 }
 
 function handleAlertRefundLimitInput(event: Event): void {
   const target = event.target as HTMLInputElement;
-  alertsForm.value.refund_alert_limit_cents = toCurrencyMaskedValue(target.value);
-}
-
-function toCurrencyMaskedValue(rawValue: string): string {
-  const digits = rawValue.replace(/\D/g, "");
-
-  if (!digits) {
-    return "";
-  }
-
-  return `R$ ${(Number.parseInt(digits, 10) / 100).toFixed(2)}`.replace(".", ",");
-}
-
-function toNullableCents(rawValue: string): number | undefined {
-  if (!rawValue.trim()) {
-    return undefined;
-  }
-
-  return parseCurrencyInputToCents(rawValue);
-}
-
-function toWeightMaskedValue(rawValue: string): string {
-  const digits = rawValue.replace(/\D/g, "");
-
-  if (!digits) {
-    return "";
-  }
-
-  const kilograms = Number.parseInt(digits, 10) / 1000;
-  return kilograms.toLocaleString("pt-BR", {
-    minimumFractionDigits: 3,
-    maximumFractionDigits: 3,
-  });
-}
-
-function toNullableKg(rawValue: string): number | undefined {
-  const normalized = rawValue.trim();
-
-  if (!normalized) {
-    return undefined;
-  }
-
-  const parsed = Number.parseFloat(normalized.replace(/\./g, "").replace(",", "."));
-
-  if (Number.isNaN(parsed)) {
-    return undefined;
-  }
-
-  return parsed;
+  alertsForm.value.refund_alert_limit_cents = formatCurrencyInput(target.value);
 }
 
 function handleTypeLimitInput(productTypeId: string, unit: "un" | "kg", event: Event): void {
   const target = event.target as HTMLInputElement;
 
   if (unit === "kg") {
-    alertTypeLimitForm.value[productTypeId] = toWeightMaskedValue(target.value);
+    alertTypeLimitForm.value[productTypeId] = formatWeightInput(target.value);
     return;
   }
 
@@ -689,6 +541,12 @@ function restoreWhatsappDefault(field: WhatsAppTemplateField): void {
 function getWhatsappTextarea(field: WhatsAppTemplateField): HTMLTextAreaElement | null {
   if (field === "whatsapp_message_fiado_vencido") {
     return whatsappVencidoTextarea.value;
+  }
+  if (field === "whatsapp_due_partial_message") {
+    return whatsappDuePartialTextarea.value;
+  }
+  if (field === "whatsapp_overdue_partial_message") {
+    return whatsappOverduePartialTextarea.value;
   }
 
   return whatsappAVencerTextarea.value;
@@ -812,9 +670,9 @@ async function loadGeneralSettings(): Promise<void> {
       store_address: settings.store_address || "",
       store_phone: formatPhoneForInput(settings.store_phone || ""),
       receipt_footer: settings.receipt_footer || "",
-      discount_limit_daily: settings.discount_limit_daily > 0 ? toCurrencyMaskedValue(String(settings.discount_limit_daily)) : "",
-      discount_limit_weekly: settings.discount_limit_weekly > 0 ? toCurrencyMaskedValue(String(settings.discount_limit_weekly)) : "",
-      discount_limit_monthly: settings.discount_limit_monthly > 0 ? toCurrencyMaskedValue(String(settings.discount_limit_monthly)) : "",
+      discount_limit_daily: settings.discount_limit_daily > 0 ? formatCurrencyInput(String(settings.discount_limit_daily)) : "",
+      discount_limit_weekly: settings.discount_limit_weekly > 0 ? formatCurrencyInput(String(settings.discount_limit_weekly)) : "",
+      discount_limit_monthly: settings.discount_limit_monthly > 0 ? formatCurrencyInput(String(settings.discount_limit_monthly)) : "",
     };
 
     fiadoForm.value = {
@@ -828,13 +686,17 @@ async function loadGeneralSettings(): Promise<void> {
         settings.whatsapp_message_fiado_vencido || getWhatsappDefaultMessage("whatsapp_message_fiado_vencido"),
       whatsapp_message_fiado_a_vencer:
         settings.whatsapp_message_fiado_a_vencer || getWhatsappDefaultMessage("whatsapp_message_fiado_a_vencer"),
+      whatsapp_due_partial_message:
+        settings.whatsapp_due_partial_message || getWhatsappDefaultMessage("whatsapp_due_partial_message"),
+      whatsapp_overdue_partial_message:
+        settings.whatsapp_overdue_partial_message || getWhatsappDefaultMessage("whatsapp_overdue_partial_message"),
     };
 
     alertsForm.value = {
       stock_alert_min_units: settings.stock_alert_min_units > 0 ? String(settings.stock_alert_min_units) : "",
-      stock_alert_min_bulk_kg: settings.stock_alert_min_bulk_kg > 0 ? toWeightMaskedValue(String(Math.round(settings.stock_alert_min_bulk_kg * 1000))) : "",
-      cash_register_alert_amount_cents: settings.cash_register_alert_amount_cents > 0 ? toCurrencyMaskedValue(String(settings.cash_register_alert_amount_cents)) : "",
-      refund_alert_limit_cents: settings.refund_alert_limit_cents > 0 ? toCurrencyMaskedValue(String(settings.refund_alert_limit_cents)) : "",
+      stock_alert_min_bulk_kg: settings.stock_alert_min_bulk_kg > 0 ? formatWeightInput(String(Math.round(settings.stock_alert_min_bulk_kg * 1000))) : "",
+      cash_register_alert_amount_cents: settings.cash_register_alert_amount_cents > 0 ? formatCurrencyInput(String(settings.cash_register_alert_amount_cents)) : "",
+      refund_alert_limit_cents: settings.refund_alert_limit_cents > 0 ? formatCurrencyInput(String(settings.refund_alert_limit_cents)) : "",
       fiado_alert_at_90_percent: settings.fiado_alert_at_90_percent,
       fiado_alert_on_due_day: settings.fiado_alert_on_due_day,
     };
@@ -846,7 +708,7 @@ async function loadGeneralSettings(): Promise<void> {
       const typeUnit = getTypeUnit(productTypeId);
 
       if (typeUnit === "kg") {
-        nextTypeLimits[productTypeId] = toWeightMaskedValue(String(Math.round(value * 1000)));
+        nextTypeLimits[productTypeId] = formatWeightInput(String(Math.round(value * 1000)));
         continue;
       }
 
@@ -863,6 +725,17 @@ async function loadGeneralSettings(): Promise<void> {
     }
 
     alertTypePctLimitForm.value = nextTypePctLimits;
+
+    backupForm.value = {
+      backup_path: settings.backup_path || "/var/backups/pdv",
+      backup_frequency: settings.backup_frequency || "daily",
+      backup_retention: settings.backup_retention != null && settings.backup_retention > 0 ? String(settings.backup_retention) : "7",
+      backup_cloud_enabled: settings.backup_cloud_enabled ?? false,
+      backup_cloud_token: settings.backup_cloud_token || "",
+      backup_encryption_enabled: settings.backup_encryption_enabled ?? false,
+      backup_password: settings.backup_password || "",
+      backup_time: settings.backup_time || "03:00",
+    };
   } catch {
     generalSettingsError.value = "Erro de conexão ao carregar configurações gerais.";
   } finally {
@@ -884,9 +757,9 @@ async function saveSystemSettings(): Promise<void> {
         store_address: systemForm.value.store_address.trim(),
         store_phone: normalizeDigits(systemForm.value.store_phone),
         receipt_footer: systemForm.value.receipt_footer.trim(),
-        discount_limit_daily: toNullableCents(systemForm.value.discount_limit_daily),
-        discount_limit_weekly: toNullableCents(systemForm.value.discount_limit_weekly),
-        discount_limit_monthly: toNullableCents(systemForm.value.discount_limit_monthly),
+        discount_limit_daily: parseCurrencyInputToNullableCents(systemForm.value.discount_limit_daily) ?? undefined,
+        discount_limit_weekly: parseCurrencyInputToNullableCents(systemForm.value.discount_limit_weekly) ?? undefined,
+        discount_limit_monthly: parseCurrencyInputToNullableCents(systemForm.value.discount_limit_monthly) ?? undefined,
       }),
     });
     const data = await response.json();
@@ -960,6 +833,12 @@ async function saveWhatsappSettings(): Promise<void> {
         whatsapp_message_fiado_a_vencer:
           (whatsappForm.value.whatsapp_message_fiado_a_vencer.trim() ||
             getWhatsappDefaultMessage("whatsapp_message_fiado_a_vencer")),
+        whatsapp_due_partial_message:
+          (whatsappForm.value.whatsapp_due_partial_message.trim() ||
+            getWhatsappDefaultMessage("whatsapp_due_partial_message")),
+        whatsapp_overdue_partial_message:
+          (whatsappForm.value.whatsapp_overdue_partial_message.trim() ||
+            getWhatsappDefaultMessage("whatsapp_overdue_partial_message")),
       }),
     });
     const data = await response.json();
@@ -985,7 +864,7 @@ async function saveAlertsSettings(): Promise<void> {
   const stockMinUnits = alertsForm.value.stock_alert_min_units
     ? Number.parseInt(alertsForm.value.stock_alert_min_units, 10)
     : 0;
-  const stockMinBulkKg = toNullableKg(alertsForm.value.stock_alert_min_bulk_kg) ?? 0;
+  const stockMinBulkKg = parseWeightInputToNullableKg(alertsForm.value.stock_alert_min_bulk_kg) ?? 0;
 
   if (Number.isNaN(stockMinUnits) || stockMinUnits < 0) {
     alertsSubmitError.value = "Informe uma quantidade mínima de estoque válida.";
@@ -1011,9 +890,9 @@ async function saveAlertsSettings(): Promise<void> {
     const typeUnit = getTypeUnit(productTypeId);
 
     if (typeUnit === "kg") {
-      const parsedKg = toNullableKg(trimmed);
+      const parsedKg = parseWeightInputToNullableKg(trimmed);
 
-      if (parsedKg === undefined || Number.isNaN(parsedKg) || parsedKg < 0) {
+      if (parsedKg === null || Number.isNaN(parsedKg) || parsedKg < 0) {
         continue;
       }
 
@@ -1055,8 +934,10 @@ async function saveAlertsSettings(): Promise<void> {
       body: JSON.stringify({
         stock_alert_min_units: stockMinUnits,
         stock_alert_min_bulk_kg: stockMinBulkKg,
-        cash_register_alert_amount_cents: toNullableCents(alertsForm.value.cash_register_alert_amount_cents) ?? 0,
-        refund_alert_limit_cents: toNullableCents(alertsForm.value.refund_alert_limit_cents) ?? 50000,
+        cash_register_alert_amount_cents:
+          parseCurrencyInputToNullableCents(alertsForm.value.cash_register_alert_amount_cents) ?? 0,
+        refund_alert_limit_cents:
+          parseCurrencyInputToNullableCents(alertsForm.value.refund_alert_limit_cents) ?? 50000,
         fiado_alert_at_90_percent: alertsForm.value.fiado_alert_at_90_percent,
         fiado_alert_on_due_day: alertsForm.value.fiado_alert_on_due_day,
         ...stockTypePayload,
@@ -1165,26 +1046,6 @@ function validateForm(): boolean {
   }
 
   return Object.keys(formErrors.value).length === 0;
-}
-
-function parseRateInput(value: string): number | null {
-  const normalized = value.replace(",", ".").trim();
-
-  if (!normalized) {
-    return null;
-  }
-
-  if (!/^\d+(\.\d{1,2})?$/.test(normalized)) {
-    return null;
-  }
-
-  const parsed = Number.parseFloat(normalized);
-
-  if (Number.isNaN(parsed) || parsed < 0 || parsed > 100) {
-    return null;
-  }
-
-  return parsed;
 }
 
 function handleRateInput(event: Event, field: keyof CardMachineFormData["rates"]): void {
@@ -1408,13 +1269,17 @@ async function deleteCardMachine(cardMachine: CardMachine): Promise<void> {
   }
 }
 
-function openPasswordModal(): void {
-  if (!validateForm()) {
+function openPasswordModal(action: PendingPasswordAction = "pix"): void {
+  if (action === "pix" && !validateForm()) {
     formErrors.value.submit = "Revise os campos destacados para continuar.";
     return;
   }
 
-  formErrors.value.submit = undefined;
+  if (action === "pix") {
+    formErrors.value.submit = undefined;
+  }
+
+  pendingPasswordAction.value = action;
   confirmationPassword.value = "";
   passwordErrors.value = [];
   modalError.value = null;
@@ -1427,6 +1292,15 @@ function closePasswordModal(): void {
   passwordErrors.value = [];
   modalError.value = null;
 }
+
+useModalStack(
+  [
+    { isOpen: showCardMachineModal, close: closeCardMachineModal },
+    { isOpen: showPasswordModal, close: closePasswordModal },
+    { isOpen: showRestoreModal, close: () => (showRestoreModal.value = false) },
+  ],
+  { listenEscape: true },
+);
 
 function showSuccessToast(message: string): void {
   toast(message);
@@ -1496,11 +1370,216 @@ function changeMainTab(tab: MainTabKey): void {
     activePaymentTab.value = "pix";
     return;
   }
+
+  if (tab === "alerts") {
+    activeAlertsTab.value = "stock";
+    return;
+  }
 }
 
 function changePaymentTab(tab: PaymentTabKey): void {
   activePaymentTab.value = tab;
 }
+
+function changeAlertsTab(tab: AlertsTabKey): void {
+  activeAlertsTab.value = tab;
+}
+
+function toggleBackupPasswordVisibility(): void {
+  backupPasswordVisible.value = !backupPasswordVisible.value;
+}
+
+async function generateBackupNow(): Promise<void> {
+  const ok = await confirm({
+    title: "Gerar Backup Manual",
+    message: "Atenção: A geração de backup pode consumir recursos do servidor. Deseja continuar?",
+    confirmLabel: "Gerar Backup",
+  });
+
+  if (!ok) {
+    return;
+  }
+
+  backupGenerating.value = true;
+
+  try {
+    const response = await authenticatedFetch("/api/backups/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!response.ok) {
+      return;
+    }
+
+    await loadBackupHistory();
+    backupHistoryPage.value = 1;
+    showSuccessToast("Backup gerado com sucesso!");
+  } catch {
+    toast("Erro de conexão ao gerar backup.", "error");
+  } finally {
+    backupGenerating.value = false;
+  }
+}
+
+function toggleBackupCloudKeyVisibility(): void {
+  backupCloudKeyVisible.value = !backupCloudKeyVisible.value;
+}
+
+function openBackupPasswordModal(): void {
+  backupSubmitError.value = null;
+  openPasswordModal("backup");
+}
+
+async function confirmSaveBackupSettings(): Promise<void> {
+  passwordErrors.value = [];
+  modalError.value = null;
+  loadingSubmit.value = true;
+
+  const retention = backupForm.value.backup_retention
+    ? Number.parseInt(backupForm.value.backup_retention, 10)
+    : 7;
+
+  try {
+    const response = await authenticatedFetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        backup_path: backupForm.value.backup_path.trim(),
+        backup_frequency: backupForm.value.backup_frequency,
+        backup_retention: Number.isNaN(retention) || retention < 1 ? 7 : retention,
+        backup_cloud_enabled: backupForm.value.backup_cloud_enabled,
+        backup_cloud_token: backupForm.value.backup_cloud_token.trim(),
+        backup_encryption_enabled: backupForm.value.backup_encryption_enabled,
+        backup_password: backupForm.value.backup_encryption_enabled ? backupForm.value.backup_password : "",
+        backup_time: backupForm.value.backup_time,
+        password: confirmationPassword.value,
+      }),
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      const errors = (data.errors || {}) as Record<string, string[]>;
+      passwordErrors.value = errors.password || [];
+
+      if (passwordErrors.value.length > 0) {
+        modalError.value = data.message || "Confirme sua senha para continuar.";
+        return;
+      }
+
+      modalError.value = data.message || "Não foi possível salvar as configurações de backup.";
+      return;
+    }
+
+    closePasswordModal();
+    await loadGeneralSettings();
+    showSuccessToast("Configurações de backup salvas com sucesso!");
+  } catch {
+    modalError.value = "Erro de conexão ao salvar configurações de backup.";
+  } finally {
+    loadingSubmit.value = false;
+  }
+}
+
+async function downloadBackup(id: string): Promise<void> {
+  try {
+    const response = await authenticatedFetch(`/api/backups/download/${id}`);
+    if (!response.ok) {
+      return;
+    }
+
+    const disposition = response.headers.get("Content-Disposition");
+    const filenameMatch = disposition?.match(/filename\*?=(?:UTF-8'')?["']?([^"';\r\n]+)["']?/i);
+    const filename = filenameMatch?.[1]
+      ? decodeURIComponent(filenameMatch[1])
+      : `backup-${id}.db.enc`;
+
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  } catch {
+    toast("Erro de conexão ao baixar backup.", "error");
+  }
+}
+
+async function loadBackupHistory(): Promise<void> {
+  backupHistoryLoading.value = true;
+  backupHistoryError.value = null;
+  try {
+    const response = await authenticatedFetch("/api/backups");
+    if (!response.ok) {
+      backupHistoryError.value = "Não foi possível carregar o histórico de backups.";
+      return;
+    }
+    const json = await response.json() as { data: BackupHistoryEntry[] };
+    backupHistory.value = json.data;
+  } catch {
+    backupHistoryError.value = "Erro de conexão ao carregar histórico de backups.";
+  } finally {
+    backupHistoryLoading.value = false;
+  }
+}
+
+const restoreLoading = ref(false);
+
+function handleRestoreFileChange(event: Event): void {
+  const target = event.target as HTMLInputElement;
+  if (target.files && target.files.length > 0) {
+    restoreFile.value = target.files[0] || null;
+  }
+}
+
+async function submitRestore(): Promise<void> {
+  if (!restoreFile.value) {
+    toast("Selecione um arquivo de backup para restaurar.", "warning");
+    return;
+  }
+
+  const ok = await confirm({
+    title: "⚠️ AVISO CRÍTICO: Restauração de Sistema",
+    message: "O sistema será paralisado, os terminais logados serão desconectados temporariamente e o serviço será reiniciado. Todos os dados atuais do escopo selecionado serão substituídos. Deseja prosseguir?",
+    confirmLabel: "Sim, Restaurar Sistema",
+  });
+
+  if (!ok) return;
+
+  restoreLoading.value = true;
+
+  try {
+    const formData = new FormData();
+    formData.append("file", restoreFile.value);
+    formData.append("scope", restoreScope.value);
+    formData.append("password", restorePassword.value);
+
+    // Nota: Ao enviar FormData, NÃO definimos Content-Type para deixar o navegador definir o boundary
+    const response = await authenticatedFetch("/api/backups/restore", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    showRestoreModal.value = false;
+    showSuccessToast("Restauração iniciada! O sistema reiniciará em instantes.");
+    
+    // Opcional: Forçar logout ou recarregar após alguns segundos
+    setTimeout(() => {
+      window.location.reload();
+    }, 3000);
+  } catch {
+    toast("Erro de conexão ao enviar restauração.", "error");
+  } finally {
+    restoreLoading.value = false;
+  }
+}
+
 </script>
 
 <template>
@@ -1509,12 +1588,10 @@ function changePaymentTab(tab: PaymentTabKey): void {
     <div class="flex flex-1 flex-col">
       <AppHeader />
       <main class="flex-1 p-6">
-        <div class="flex flex-wrap items-center justify-between gap-4">
-          <h1 class="text-3xl font-bold text-gray-900">Configurações</h1>
-        </div>
+
 
         <div class="mt-6 overflow-x-auto -mx-3 px-3 md:mx-0 md:px-0">
-          <div class="flex gap-1 min-w-max md:min-w-0 border-b border-gray-200">
+          <div class="flex gap-1 min-w-max border-b border-gray-200">
             <button
               type="button"
               :class="[
@@ -1551,12 +1628,24 @@ function changePaymentTab(tab: PaymentTabKey): void {
             >
               Alertas e Notificações
             </button>
+            <button
+              type="button"
+              :class="[
+                'min-h-11 whitespace-nowrap rounded-t-lg px-4 py-2 text-sm font-semibold transition',
+                activeMainTab === 'backup'
+                  ? 'bg-primary text-white'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+              ]"
+              @click="changeMainTab('backup')"
+            >
+              Backup
+            </button>
           </div>
         </div>
 
         <section v-if="activeMainTab === 'payment-methods'" class="mt-4">
           <div class="overflow-x-auto -mx-3 px-3 md:mx-0 md:px-0 bg-surface/70">
-            <div class="flex gap-1 min-w-max md:min-w-0 border-b border-gray-200 px-1">
+            <div class="flex gap-1 min-w-max border-b border-gray-200 px-1">
               <button
                 type="button"
                 :class="[
@@ -1597,18 +1686,6 @@ function changePaymentTab(tab: PaymentTabKey): void {
                 type="button"
                 :class="[
                   'min-h-11 whitespace-nowrap rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition',
-                  activePaymentTab === 'whatsapp'
-                    ? 'border-primary bg-white text-primary'
-                    : 'border-transparent text-gray-600 hover:border-gray-300 hover:text-gray-900',
-                ]"
-                @click="changePaymentTab('whatsapp')"
-              >
-                Mensagens WhatsApp
-              </button>
-              <button
-                type="button"
-                :class="[
-                  'min-h-11 whitespace-nowrap rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition',
                   activePaymentTab === 'change-discount'
                     ? 'border-primary bg-white text-primary'
                     : 'border-transparent text-gray-600 hover:border-gray-300 hover:text-gray-900',
@@ -1616,6 +1693,49 @@ function changePaymentTab(tab: PaymentTabKey): void {
                 @click="changePaymentTab('change-discount')"
               >
                 Desconto de Troco
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="activeMainTab === 'alerts'" class="mt-4">
+          <div class="overflow-x-auto -mx-3 px-3 md:mx-0 md:px-0 bg-surface/70">
+            <div class="flex gap-1 min-w-max border-b border-gray-200 px-1">
+              <button
+                type="button"
+                :class="[
+                  'min-h-11 whitespace-nowrap rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition',
+                  activeAlertsTab === 'stock'
+                    ? 'border-primary bg-white text-primary'
+                    : 'border-transparent text-gray-600 hover:border-gray-300 hover:text-gray-900',
+                ]"
+                @click="changeAlertsTab('stock')"
+              >
+                Estoque Notificações
+              </button>
+              <button
+                type="button"
+                :class="[
+                  'min-h-11 whitespace-nowrap rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition',
+                  activeAlertsTab === 'whatsapp'
+                    ? 'border-primary bg-white text-primary'
+                    : 'border-transparent text-gray-600 hover:border-gray-300 hover:text-gray-900',
+                ]"
+                @click="changeAlertsTab('whatsapp')"
+              >
+                Mensagens WhatsApp
+              </button>
+              <button
+                type="button"
+                :class="[
+                  'min-h-11 whitespace-nowrap rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition',
+                  activeAlertsTab === 'fiado'
+                    ? 'border-primary bg-white text-primary'
+                    : 'border-transparent text-gray-600 hover:border-gray-300 hover:text-gray-900',
+                ]"
+                @click="changeAlertsTab('fiado')"
+              >
+                Alerta Fiado
               </button>
             </div>
           </div>
@@ -1848,7 +1968,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
               {{ formErrors.submit }}
             </div>
 
-            <form class="mt-6 space-y-6" novalidate @submit.prevent="openPasswordModal">
+            <form class="mt-6 space-y-6" novalidate @submit.prevent="() => openPasswordModal('pix')">
               <div class="grid gap-6 lg:grid-cols-2">
                 <div class="lg:col-span-2">
                   <label for="pix_key_type" class="mb-1 block text-sm font-medium text-gray-700">
@@ -2219,13 +2339,13 @@ function changePaymentTab(tab: PaymentTabKey): void {
 
         <section
           v-if="
-            activeMainTab === 'payment-methods' &&
-            activePaymentTab === 'whatsapp'
+            activeMainTab === 'alerts' &&
+            activeAlertsTab === 'whatsapp'
           "
           class="mt-6"
         >
           <div class="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-            <h2 class="text-2xl font-bold text-gray-900">Mensagens WhatsApp</h2>
+            <h2 class="text-2xl font-bold text-gray-900">Mensagens de cobrança no WhatsApp</h2>
             <p class="mt-1 text-sm text-gray-600">Personalize os modelos usados nas cobranças automáticas de fiado.</p>
 
             <p v-if="whatsappSubmitError" class="mt-4 rounded bg-red-100 p-3 text-sm text-danger" role="alert">
@@ -2233,8 +2353,60 @@ function changePaymentTab(tab: PaymentTabKey): void {
             </p>
 
             <form class="mt-6 space-y-6" @submit.prevent="saveWhatsappSettings">
+              <!-- Tabs WhatsApp -->
+              <div class="flex flex-wrap gap-2 border-b border-gray-200">
+                <button
+                  type="button"
+                  :class="[
+                    'px-4 py-2 text-sm font-semibold transition border-b-2',
+                    activeWhatsappTemplate === 'whatsapp_message_fiado_vencido'
+                      ? 'border-primary text-primary'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  ]"
+                  @click="activeWhatsappTemplate = 'whatsapp_message_fiado_vencido'"
+                >
+                  Vencido (Total)
+                </button>
+                <button
+                  type="button"
+                  :class="[
+                    'px-4 py-2 text-sm font-semibold transition border-b-2',
+                    activeWhatsappTemplate === 'whatsapp_message_fiado_a_vencer'
+                      ? 'border-primary text-primary'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  ]"
+                  @click="activeWhatsappTemplate = 'whatsapp_message_fiado_a_vencer'"
+                >
+                  A Vencer (Total)
+                </button>
+                <button
+                  type="button"
+                  :class="[
+                    'px-4 py-2 text-sm font-semibold transition border-b-2',
+                    activeWhatsappTemplate === 'whatsapp_overdue_partial_message'
+                      ? 'border-primary text-primary'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  ]"
+                  @click="activeWhatsappTemplate = 'whatsapp_overdue_partial_message'"
+                >
+                  Vencido (Parcial)
+                </button>
+                <button
+                  type="button"
+                  :class="[
+                    'px-4 py-2 text-sm font-semibold transition border-b-2',
+                    activeWhatsappTemplate === 'whatsapp_due_partial_message'
+                      ? 'border-primary text-primary'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  ]"
+                  @click="activeWhatsappTemplate = 'whatsapp_due_partial_message'"
+                >
+                  A Vencer (Parcial)
+                </button>
+              </div>
+
               <div class="grid gap-4">
-                <div>
+                <div v-show="activeWhatsappTemplate === 'whatsapp_message_fiado_vencido'">
                   <div class="mb-1 flex items-center justify-between gap-3">
                     <label for="whatsapp_message_fiado_vencido" class="block text-sm font-medium text-gray-700">
                       Mensagem para fiado vencido
@@ -2276,7 +2448,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
                   ></textarea>
                 </div>
 
-                <div>
+                <div v-show="activeWhatsappTemplate === 'whatsapp_message_fiado_a_vencer'">
                   <div class="mb-1 flex items-center justify-between gap-3">
                     <label for="whatsapp_message_fiado_a_vencer" class="block text-sm font-medium text-gray-700">
                       Mensagem para fiado a vencer
@@ -2318,6 +2490,90 @@ function changePaymentTab(tab: PaymentTabKey): void {
                   ></textarea>
                 </div>
 
+                <div v-show="activeWhatsappTemplate === 'whatsapp_due_partial_message'">
+                  <div class="mb-1 flex items-center justify-between gap-3">
+                    <label for="whatsapp_due_partial_message" class="block text-sm font-medium text-gray-700">
+                      Mensagem para fiado a vencer (Cobrança Parcial)
+                    </label>
+                    <span class="text-xs font-medium text-gray-500">
+                      {{ getWhatsappMessageLength('whatsapp_due_partial_message') }}/2000 caracteres
+                    </span>
+                  </div>
+                  <p class="mb-2 text-xs text-gray-500">
+                    Clique nos botões acima para incluir informações que o sistema preenche sozinho.
+                  </p>
+                  <div class="mb-3 flex flex-wrap items-center gap-2">
+                    <button
+                      v-for="button in whatsappTokenButtons"
+                      :key="`due-partial-${button.token}`"
+                      type="button"
+                      class="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 transition hover:bg-blue-100"
+                      @click="insertWhatsappToken('whatsapp_due_partial_message', button.token)"
+                    >
+                      {{ button.label }}
+                    </button>
+                    <button
+                      type="button"
+                      class="rounded-full border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 transition hover:bg-gray-50"
+                      @click="restoreWhatsappDefault('whatsapp_due_partial_message')"
+                    >
+                      Restaurar modelo padrão
+                    </button>
+                  </div>
+                  <textarea
+                    id="whatsapp_due_partial_message"
+                    ref="whatsappDuePartialTextarea"
+                    v-model="whatsappForm.whatsapp_due_partial_message"
+                    rows="5"
+                    maxlength="2000"
+                    class="w-full rounded border border-blue-300 px-3 py-2 text-base md:text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    placeholder="Olá [NOME], passando para lembrar que o seu fiado de [TOTAL] vence em [VENCIMENTO]. Sua cobrança atual é de [COBRANCA]. Se precisar, estamos à disposição."
+                    @blur="ensureWhatsappMessageDefault('whatsapp_due_partial_message')"
+                  ></textarea>
+                </div>
+
+                <div v-show="activeWhatsappTemplate === 'whatsapp_overdue_partial_message'">
+                  <div class="mb-1 flex items-center justify-between gap-3">
+                    <label for="whatsapp_overdue_partial_message" class="block text-sm font-medium text-gray-700">
+                      Mensagem para fiado vencido (Cobrança Parcial)
+                    </label>
+                    <span class="text-xs font-medium text-gray-500">
+                      {{ getWhatsappMessageLength('whatsapp_overdue_partial_message') }}/2000 caracteres
+                    </span>
+                  </div>
+                  <p class="mb-2 text-xs text-gray-500">
+                    Clique nos botões acima para incluir informações que o sistema preenche sozinho.
+                  </p>
+                  <div class="mb-3 flex flex-wrap items-center gap-2">
+                    <button
+                      v-for="button in whatsappTokenButtons"
+                      :key="`overdue-partial-${button.token}`"
+                      type="button"
+                      class="rounded-full border border-purple-200 bg-purple-50 px-3 py-1 text-xs font-medium text-purple-700 transition hover:bg-purple-100"
+                      @click="insertWhatsappToken('whatsapp_overdue_partial_message', button.token)"
+                    >
+                      {{ button.label }}
+                    </button>
+                    <button
+                      type="button"
+                      class="rounded-full border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 transition hover:bg-gray-50"
+                      @click="restoreWhatsappDefault('whatsapp_overdue_partial_message')"
+                    >
+                      Restaurar modelo padrão
+                    </button>
+                  </div>
+                  <textarea
+                    id="whatsapp_overdue_partial_message"
+                    ref="whatsappOverduePartialTextarea"
+                    v-model="whatsappForm.whatsapp_overdue_partial_message"
+                    rows="5"
+                    maxlength="2000"
+                    class="w-full rounded border border-purple-300 px-3 py-2 text-base md:text-sm focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-200"
+                    placeholder="Olá [NOME], notamos que o seu fiado de [TOTAL] venceu em [VENCIMENTO]. Falta um pagamento de [COBRANCA]. Como podemos te ajudar a regularizar?"
+                    @blur="ensureWhatsappMessageDefault('whatsapp_overdue_partial_message')"
+                  ></textarea>
+                </div>
+
                 <div class="rounded-2xl border border-green-200 bg-[#e7f7eb] p-4">
                   <div class="mb-3 flex items-center gap-2 text-sm font-medium text-green-900">
                     <span class="inline-flex h-8 w-8 items-center justify-center rounded-full bg-green-600 text-white">W</span>
@@ -2325,19 +2581,35 @@ function changePaymentTab(tab: PaymentTabKey): void {
                   </div>
 
                   <div class="space-y-4 rounded-2xl bg-[#d8f3dc] p-4">
-                    <div class="flex justify-start">
-                      <div class="max-w-[92%] rounded-2xl rounded-bl-md bg-white px-4 py-3 text-sm text-gray-800 shadow-sm">
+                    <div v-show="activeWhatsappTemplate === 'whatsapp_message_fiado_vencido'" class="flex justify-end">
+                      <div class="max-w-[92%] rounded-2xl rounded-tr-md bg-[#dcf8c6] px-4 py-3 text-sm text-gray-800 shadow-sm">
                         <p class="mb-1 text-xs font-semibold uppercase tracking-wide text-red-600">Fiado vencido</p>
                         <p class="whitespace-pre-line">{{ whatsappPreviewVencido }}</p>
-                        <p class="mt-2 text-right text-[11px] text-gray-400">09:41</p>
+                        <p class="mt-2 text-right text-[11px] text-gray-500">09:41</p>
                       </div>
                     </div>
 
-                    <div class="flex justify-end">
-                      <div class="max-w-[92%] rounded-2xl rounded-br-md bg-[#dcf8c6] px-4 py-3 text-sm text-gray-800 shadow-sm">
+                    <div v-show="activeWhatsappTemplate === 'whatsapp_message_fiado_a_vencer'" class="flex justify-end">
+                      <div class="max-w-[92%] rounded-2xl rounded-tr-md bg-[#dcf8c6] px-4 py-3 text-sm text-gray-800 shadow-sm">
                         <p class="mb-1 text-xs font-semibold uppercase tracking-wide text-amber-700">Fiado a vencer</p>
                         <p class="whitespace-pre-line">{{ whatsappPreviewAVencer }}</p>
-                        <p class="mt-2 text-right text-[11px] text-gray-400">09:42</p>
+                        <p class="mt-2 text-right text-[11px] text-gray-500">09:42</p>
+                      </div>
+                    </div>
+
+                    <div v-show="activeWhatsappTemplate === 'whatsapp_overdue_partial_message'" class="flex justify-end">
+                      <div class="max-w-[92%] rounded-2xl rounded-tr-md bg-[#dcf8c6] px-4 py-3 text-sm text-gray-800 shadow-sm">
+                        <p class="mb-1 text-xs font-semibold uppercase tracking-wide text-purple-700">Fiado vencido (Parcial)</p>
+                        <p class="whitespace-pre-line">{{ whatsappPreviewOverduePartial }}</p>
+                        <p class="mt-2 text-right text-[11px] text-gray-500">09:43</p>
+                      </div>
+                    </div>
+
+                    <div v-show="activeWhatsappTemplate === 'whatsapp_due_partial_message'" class="flex justify-end">
+                      <div class="max-w-[92%] rounded-2xl rounded-tr-md bg-[#dcf8c6] px-4 py-3 text-sm text-gray-800 shadow-sm">
+                        <p class="mb-1 text-xs font-semibold uppercase tracking-wide text-blue-700">Fiado a vencer (Parcial)</p>
+                        <p class="whitespace-pre-line">{{ whatsappPreviewDuePartial }}</p>
+                        <p class="mt-2 text-right text-[11px] text-gray-500">09:44</p>
                       </div>
                     </div>
                   </div>
@@ -2358,11 +2630,11 @@ function changePaymentTab(tab: PaymentTabKey): void {
         </section>
 
         <section
-          v-if="activeMainTab === 'alerts'"
+          v-if="activeMainTab === 'alerts' && activeAlertsTab === 'stock'"
           class="mt-6"
         >
           <div class="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-            <h2 class="text-2xl font-bold text-gray-900">Alertas e Notificações</h2>
+            <h2 class="text-2xl font-bold text-gray-900">Estoque Notificações</h2>
             <p class="mt-1 text-sm text-gray-600">Limites que disparam alertas automáticos para a equipe.</p>
 
             <p v-if="alertsSubmitError" class="mt-4 rounded bg-red-100 p-3 text-sm text-danger" role="alert">
@@ -2596,6 +2868,32 @@ function changePaymentTab(tab: PaymentTabKey): void {
                 </div>
               </div>
 
+              <div class="flex justify-end">
+                <button
+                  type="submit"
+                  class="w-full sm:w-auto min-h-11 inline-flex items-center justify-center rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark disabled:opacity-50"
+                  :disabled="alertsSaving"
+                >
+                  {{ alertsSaving ? "Salvando..." : "Salvar Configurações de Alertas" }}
+                </button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <section
+          v-if="activeMainTab === 'alerts' && activeAlertsTab === 'fiado'"
+          class="mt-6"
+        >
+          <div class="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+            <h2 class="text-2xl font-bold text-gray-900">Alerta Fiado</h2>
+            <p class="mt-1 text-sm text-gray-600">Gerencie os alertas gerados para o limite de crédito dos clientes.</p>
+
+            <p v-if="alertsSubmitError" class="mt-4 rounded bg-red-100 p-3 text-sm text-danger" role="alert">
+              {{ alertsSubmitError }}
+            </p>
+
+            <form class="mt-6 space-y-6" @submit.prevent="saveAlertsSettings">
               <div class="rounded-lg border border-gray-200 p-4">
                 <h3 class="text-sm font-semibold text-gray-800">Alertas de Fiado por Cliente</h3>
                 <div class="mt-3 grid gap-3 md:grid-cols-2">
@@ -2640,7 +2938,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
           aria-labelledby="card-machine-modal-title"
           @click.self="closeCardMachineModal"
         >
-          <div class="relative max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:max-w-3xl sm:rounded-2xl">
+          <div class="relative max-h-[85vh] w-full overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:max-w-3xl sm:rounded-2xl">
             <div class="mx-auto mt-3 h-1 w-12 rounded-full bg-gray-200 sm:hidden" aria-hidden="true"></div>
 
             <div class="p-4 sm:p-6">
@@ -2843,7 +3141,7 @@ function changePaymentTab(tab: PaymentTabKey): void {
           aria-labelledby="settings-password-modal-title"
           @click.self="closePasswordModal"
         >
-          <div class="relative max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:max-w-md sm:rounded-2xl">
+          <div class="relative max-h-[85vh] w-full overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:max-w-md sm:rounded-2xl">
             <div class="mx-auto mt-3 h-1 w-12 rounded-full bg-gray-200 sm:hidden" aria-hidden="true"></div>
 
             <div class="p-4 sm:p-6">
@@ -2872,14 +3170,17 @@ function changePaymentTab(tab: PaymentTabKey): void {
               </div>
 
               <p class="text-sm text-gray-600">
-                Por segurança, alterações na chave Pix exigem a confirmação da sua senha.
+                {{ pendingPasswordAction === 'backup'
+                  ? 'Por segurança, alterações nas configurações de backup exigem a confirmação da sua senha.'
+                  : 'Por segurança, alterações na chave Pix exigem a confirmação da sua senha.'
+                }}
               </p>
 
               <div v-if="modalError" class="mt-4 rounded bg-red-100 p-3 text-sm text-danger" role="alert">
                 {{ modalError }}
               </div>
 
-              <form class="mt-4 space-y-4" @submit.prevent="confirmSavePixSettings">
+              <form class="mt-4 space-y-4" @submit.prevent="pendingPasswordAction === 'backup' ? confirmSaveBackupSettings() : confirmSavePixSettings()">
               <div>
                 <label for="current_password" class="mb-1 block text-sm font-medium text-gray-700">
                   Senha do administrador *
@@ -2940,6 +3241,331 @@ function changePaymentTab(tab: PaymentTabKey): void {
         </div>
         </div>
 
+        <!-- ═══════════ ABA: BACKUP ═══════════ -->
+        <section v-if="activeMainTab === 'backup'" class="mt-6 space-y-6">
+
+          <form @submit.prevent="openBackupPasswordModal">
+
+          <p v-if="backupSubmitError" class="mb-4 rounded bg-red-100 p-3 text-sm text-danger" role="alert">
+            {{ backupSubmitError }}
+          </p>
+
+          <!-- Card 1: Retenção e Local -->
+          <div class="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+            <h2 class="text-2xl font-bold text-gray-900">Retenção e Local</h2>
+            <p class="mt-1 text-sm text-gray-600">Configure onde o backup será salvo e a política de retenção.</p>
+
+            <div class="mt-6 grid gap-4 md:grid-cols-3">
+
+
+              <div>
+                <label for="backup_frequency" class="mb-1 block text-sm font-medium text-gray-700">Frequência</label>
+                <select
+                  id="backup_frequency"
+                  v-model="backupForm.backup_frequency"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="daily">Diário</option>
+                  <option value="weekly">Semanal</option>
+                  <option value="monthly">Mensal</option>
+                </select>
+              </div>
+
+              <div>
+                <label for="backup_time" class="mb-1 block text-sm font-medium text-gray-700">Horário do Backup</label>
+                <input
+                  id="backup_time"
+                  v-model="backupForm.backup_time"
+                  type="time"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+                <p class="mt-1 text-xs text-gray-500">Horário preferencial para execução automática.</p>
+              </div>
+
+              <div>
+                <label for="backup_max_copies" class="mb-1 block text-sm font-medium text-gray-700">Quantidade de Cópias</label>
+                <select
+                  id="backup_max_copies"
+                  v-model="backupForm.backup_retention"
+                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="3">3 cópias</option>
+                  <option value="7">7 cópias</option>
+                  <option value="15">15 cópias</option>
+                  <option value="30">30 cópias</option>
+                </select>
+                <p class="mt-1 text-xs text-gray-500">Manter os últimos N backups.</p>
+              </div>
+            </div>
+
+            <!-- Seção de Criptografia -->
+            <div class="mt-6 border-t border-gray-200 pt-6">
+              <h3 class="text-sm font-semibold text-gray-800">Segurança da Cópia</h3>
+              <p class="mt-1 text-xs text-gray-500">Proteja seus backups com criptografia simétrica.</p>
+
+              <div class="mt-4 space-y-4">
+                <label class="flex cursor-pointer items-center gap-3">
+                  <button
+                    type="button"
+                    role="switch"
+                    :aria-checked="backupForm.backup_encryption_enabled"
+                    :class="[
+                      'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary/30 focus:ring-offset-2',
+                      backupForm.backup_encryption_enabled ? 'bg-primary' : 'bg-gray-200',
+                    ]"
+                    @click="backupForm.backup_encryption_enabled = !backupForm.backup_encryption_enabled"
+                  >
+                    <span
+                      :class="[
+                        'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                        backupForm.backup_encryption_enabled ? 'translate-x-5' : 'translate-x-0',
+                      ]"
+                    ></span>
+                  </button>
+                  <span class="text-sm font-medium text-gray-700">Habilitar Cópia Segura (Criptografada)</span>
+                </label>
+
+                <div v-if="backupForm.backup_encryption_enabled">
+                  <label for="backup_encryption_password" class="mb-1 block text-sm font-medium text-gray-700">Senha de Criptografia</label>
+                  <div class="relative">
+                    <input
+                      id="backup_encryption_password"
+                      v-model="backupForm.backup_password"
+                      :type="backupPasswordVisible ? 'text' : 'password'"
+                      placeholder="Senha para criptografar o backup"
+                      class="w-full rounded border border-gray-300 px-3 py-2 pr-10 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    />
+                    <button
+                      type="button"
+                      class="absolute inset-y-0 right-0 flex items-center px-3 text-gray-500 hover:text-gray-700"
+                      :aria-label="backupPasswordVisible ? 'Ocultar senha' : 'Mostrar senha'"
+                      @click="toggleBackupPasswordVisibility"
+                    >
+                      <svg v-if="!backupPasswordVisible" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                      <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7a9.97 9.97 0 012.31-3.814M6.938 6.938A9.966 9.966 0 0112 5c4.478 0 8.268 2.943 9.542 7a9.973 9.973 0 01-4.293 5.149M15 12a3 3 0 11-6 0" />
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 3l18 18" />
+                      </svg>
+                    </button>
+                  </div>
+                  <p class="mt-1 text-xs text-gray-500">Esta senha será necessária para restaurar o backup.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 2: Backup em Nuvem -->
+          <div class="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 class="text-2xl font-bold text-gray-900">Backup em Nuvem</h2>
+                <p class="mt-1 text-sm text-gray-600">Envie uma cópia automática para um serviço de armazenamento externo.</p>
+              </div>
+              <span
+                :class="[
+                  'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold whitespace-nowrap',
+                  backupCloudStatus === 'connected'
+                    ? 'bg-green-100 text-green-800'
+                    : 'bg-gray-100 text-gray-600',
+                ]"
+              >
+                <span
+                  :class="[
+                    'inline-block h-2 w-2 rounded-full',
+                    backupCloudStatus === 'connected' ? 'bg-green-500' : 'bg-gray-400',
+                  ]"
+                ></span>
+                {{ backupCloudStatus === 'connected' ? 'Conectado' : 'Não configurado' }}
+              </span>
+            </div>
+
+            <div class="mt-6 space-y-4">
+              <label class="flex cursor-pointer items-center gap-3">
+                <button
+                  type="button"
+                  role="switch"
+                  :aria-checked="backupForm.backup_cloud_enabled"
+                  :class="[
+                    'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary/30 focus:ring-offset-2',
+                    backupForm.backup_cloud_enabled ? 'bg-primary' : 'bg-gray-200',
+                  ]"
+                  @click="backupForm.backup_cloud_enabled = !backupForm.backup_cloud_enabled"
+                >
+                  <span
+                    :class="[
+                      'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                      backupForm.backup_cloud_enabled ? 'translate-x-5' : 'translate-x-0',
+                    ]"
+                  ></span>
+                </button>
+                <span class="text-sm font-medium text-gray-700">Habilitar Cópia na Nuvem</span>
+              </label>
+
+              <div v-if="backupForm.backup_cloud_enabled">
+                <label for="backup_cloud_api_key" class="mb-1 block text-sm font-medium text-gray-700">Chave da API / Token</label>
+                <div class="relative">
+                  <input
+                    id="backup_cloud_api_key"
+                    v-model="backupForm.backup_cloud_token"
+                    :type="backupCloudKeyVisible ? 'text' : 'password'"
+                    placeholder="Cole sua chave de API aqui"
+                    class="w-full rounded border border-gray-300 px-3 py-2 pr-10 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                  <button
+                    type="button"
+                    class="absolute inset-y-0 right-0 flex items-center px-3 text-gray-500 hover:text-gray-700"
+                    :aria-label="backupCloudKeyVisible ? 'Ocultar chave' : 'Mostrar chave'"
+                    @click="toggleBackupCloudKeyVisibility"
+                  >
+                    <!-- Eye open -->
+                    <svg v-if="!backupCloudKeyVisible" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                    <!-- Eye closed -->
+                    <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7a9.97 9.97 0 012.31-3.814M6.938 6.938A9.966 9.966 0 0112 5c4.478 0 8.268 2.943 9.542 7a9.973 9.973 0 01-4.293 5.149M15 12a3 3 0 11-6 0" />
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M3 3l18 18" />
+                    </svg>
+                  </button>
+                </div>
+                <p class="mt-1 text-xs text-gray-500">Token de acesso ao serviço de armazenamento em nuvem.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex justify-end">
+            <button
+              type="submit"
+              class="w-full sm:w-auto min-h-11 inline-flex items-center justify-center rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark disabled:opacity-50"
+              :disabled="backupSaving"
+            >
+              {{ backupSaving ? 'Salvando...' : 'Salvar Configurações de Backup' }}
+            </button>
+          </div>
+
+          </form>
+
+          <!-- Card 3: Ações Manuais e Histórico -->
+          <div class="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 class="text-2xl font-bold text-gray-900">Ações Manuais e Histórico</h2>
+                <p class="mt-1 text-sm text-gray-600">Gere um backup sob demanda e consulte o histórico de execuções.</p>
+              </div>
+              <button
+                type="button"
+                class="w-full sm:w-auto min-h-11 inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-5 py-2 text-sm font-medium text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
+                :disabled="backupGenerating"
+                @click="generateBackupNow"
+              >
+                <svg
+                  v-if="backupGenerating"
+                  class="h-4 w-4 animate-spin"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                {{ backupGenerating ? 'Gerando...' : 'Gerar Backup Agora' }}
+              </button>
+              <button
+                type="button"
+                class="w-full sm:w-auto min-h-11 inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-5 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+                @click="showRestoreModal = true"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+                Restaurar a partir de arquivo
+              </button>
+            </div>
+
+            <!-- Tabela de histórico -->
+            <div class="mt-6 overflow-x-auto">
+              <table v-if="backupHistory.length > 0" class="w-full text-left text-sm">
+                <thead>
+                  <tr class="border-b border-gray-200 text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <th class="px-3 py-2">Data</th>
+                    <th class="px-3 py-2">Tamanho</th>
+                    <th class="px-3 py-2">Status</th>
+                    <th class="px-3 py-2 text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="entry in paginatedBackupHistory"
+                    :key="entry.id"
+                    class="border-b border-gray-100 transition hover:bg-gray-50"
+                  >
+                    <td class="whitespace-nowrap px-3 py-2.5 text-gray-700">{{ formatDateTimeForDisplay(entry.createdAt) }}</td>
+                    <td class="whitespace-nowrap px-3 py-2.5 text-gray-700">{{ formatFileSize(entry.sizeBytes) }}</td>
+                    <td class="whitespace-nowrap px-3 py-2.5">
+                      <span
+                        :class="[
+                          'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold',
+                          entry.status === 'success'
+                            ? 'bg-green-100 text-green-800'
+                            : entry.status === 'error'
+                              ? 'bg-red-100 text-red-800'
+                              : 'bg-yellow-100 text-yellow-800',
+                        ]"
+                      >
+                        {{ entry.status === 'success' ? 'Sucesso' : entry.status === 'error' ? 'Falha' : 'Em andamento' }}
+                      </span>
+                    </td>
+                    <td class="whitespace-nowrap px-3 py-2.5 text-right">
+                      <button
+                        v-if="entry.status === 'success'"
+                        type="button"
+                        class="inline-flex h-8 w-8 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-primary transition"
+                        title="Download Backup"
+                        @click="downloadBackup(entry.id)"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <p v-else class="py-6 text-center text-sm text-gray-500">Nenhum backup registrado.</p>
+            </div>
+
+            <!-- Paginação -->
+            <div v-if="totalBackupHistoryPages > 1" class="mt-4 flex items-center justify-between border-t border-gray-200 pt-3">
+              <p class="text-xs text-gray-500">
+                Página {{ backupHistoryPage }} de {{ totalBackupHistoryPages }}
+              </p>
+              <div class="flex gap-1">
+                <button
+                  type="button"
+                  class="min-h-9 rounded border border-gray-300 px-3 py-1 text-xs font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  :disabled="backupHistoryPage <= 1"
+                  @click="backupHistoryPage--"
+                >
+                  Anterior
+                </button>
+                <button
+                  type="button"
+                  class="min-h-9 rounded border border-gray-300 px-3 py-1 text-xs font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  :disabled="backupHistoryPage >= totalBackupHistoryPages"
+                  @click="backupHistoryPage++"
+                >
+                  Próxima
+                </button>
+              </div>
+            </div>
+          </div>
+
+        </section>
+
         <div
           v-if="showToast"
           :role="toastType === 'error' ? 'alert' : 'status'"
@@ -2964,4 +3590,129 @@ function changePaymentTab(tab: PaymentTabKey): void {
     @confirm="onConfirm"
     @cancel="onCancel"
   />
+
+  <!-- Modal de Restauração -->
+  <div
+    v-if="showRestoreModal"
+    class="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="restore-modal-title"
+    @click.self="showRestoreModal = false"
+  >
+    <div class="relative max-h-[90vh] w-full overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:max-w-lg sm:rounded-2xl">
+      <div class="mx-auto mt-3 h-1 w-12 rounded-full bg-gray-200 sm:hidden" aria-hidden="true"></div>
+
+      <div class="p-4 sm:p-6">
+        <div class="mb-6 flex items-center justify-between">
+          <h2 id="restore-modal-title" class="text-xl font-bold text-gray-900">
+            Restaurar Backup
+          </h2>
+          <button
+            type="button"
+            class="min-h-11 min-w-11 flex items-center justify-center rounded-lg text-gray-400 transition hover:bg-gray-100 hover:text-gray-600"
+            @click="showRestoreModal = false"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <form @submit.prevent="submitRestore" class="space-y-6">
+          <!-- Upload de Arquivo -->
+          <div>
+            <label class="mb-2 block text-sm font-medium text-gray-700">Arquivo de Backup (.db, .enc, .tar.gz)</label>
+            <input
+              type="file"
+              accept=".db,.enc,.tar.gz"
+              class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
+              @change="handleRestoreFileChange"
+            />
+          </div>
+
+          <!-- Senha de Descriptografia -->
+          <div>
+            <label for="restore_password" class="mb-1 block text-sm font-medium text-gray-700">Senha de Descriptografia (se aplicável)</label>
+            <input
+              id="restore_password"
+              v-model="restorePassword"
+              type="password"
+              placeholder="Digite a senha usada no backup"
+              class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+            />
+          </div>
+
+          <!-- Escopo da Restauração -->
+          <div>
+            <span class="mb-3 block text-sm font-medium text-gray-700">Escopo da Restauração</span>
+            <div class="space-y-3">
+              <label class="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-gray-100 hover:bg-gray-50 transition">
+                <input type="radio" v-model="restoreScope" value="full" class="h-4 w-4 text-primary focus:ring-primary" />
+                <div>
+                  <span class="block text-sm font-semibold text-gray-900">Total (Full)</span>
+                  <span class="block text-xs text-gray-500">Substitui todos os dados e configurações do sistema.</span>
+                </div>
+              </label>
+
+              <label class="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-gray-100 hover:bg-gray-50 transition">
+                <input type="radio" v-model="restoreScope" value="products" class="h-4 w-4 text-primary focus:ring-primary" />
+                <div>
+                  <span class="block text-sm font-semibold text-gray-900">Produtos e Estoque</span>
+                  <span class="block text-xs text-gray-500">Restaura apenas o catálogo e saldos atuais.</span>
+                </div>
+              </label>
+
+              <label class="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-gray-100 hover:bg-gray-50 transition">
+                <input type="radio" v-model="restoreScope" value="customers" class="h-4 w-4 text-primary focus:ring-primary" />
+                <div>
+                  <span class="block text-sm font-semibold text-gray-900">Clientes e Fiado</span>
+                  <span class="block text-xs text-gray-500">Restaura cadastros e históricos de dívidas.</span>
+                </div>
+              </label>
+
+              <label class="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-gray-100 hover:bg-gray-50 transition">
+                <input type="radio" v-model="restoreScope" value="types" class="h-4 w-4 text-primary focus:ring-primary" />
+                <div>
+                  <span class="block text-sm font-semibold text-gray-900">Tipos de Produtos</span>
+                  <span class="block text-xs text-gray-500">Restaura as categorias e unidades de medida.</span>
+                </div>
+              </label>
+
+              <label class="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-gray-100 hover:bg-gray-50 transition">
+                <input type="radio" v-model="restoreScope" value="notifications" class="h-4 w-4 text-primary focus:ring-primary" />
+                <div>
+                  <span class="block text-sm font-semibold text-gray-900">Notificações</span>
+                  <span class="block text-xs text-gray-500">Restaura logs e preferências de alertas.</span>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <!-- Ações -->
+          <div class="flex flex-col-reverse gap-2 pt-4 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              class="w-full sm:w-auto min-h-11 rounded-lg border border-gray-300 px-6 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+              :disabled="restoreLoading"
+              @click="showRestoreModal = false"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              class="w-full sm:w-auto min-h-11 inline-flex items-center justify-center gap-2 rounded-lg bg-danger px-6 py-2 text-sm font-medium text-white transition hover:bg-red-700 disabled:opacity-50"
+              :disabled="restoreLoading || !restoreFile"
+            >
+              <svg v-if="restoreLoading" class="h-4 w-4 animate-spin" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              {{ restoreLoading ? 'Processando...' : 'Iniciar Restauração' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
 </template>

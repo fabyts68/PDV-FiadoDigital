@@ -16,6 +16,7 @@ data/
 .env
 .env.local
 .env.*.local
+.env.production
 
 # Backups locais
 backups/
@@ -51,6 +52,10 @@ temp/
 .cache/
 
 # Projeto — arquivos ignorados
-docs/info-projeto/*
+apps/api/coverage/
 apps/web/test-results/*
 .github/*
+
+# Chaves Privadas
+*.pem
+*.key

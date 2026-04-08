@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import AppHeader from "@/components/layout/app-header.vue";
 import AppSidebar from "@/components/layout/app-sidebar.vue";
 import ConfirmDialog from "@/components/layout/confirm-dialog.vue";
 import { useApi } from "@/composables/use-api.js";
 import { useConfirm } from "@/composables/use-confirm.js";
 import { useToast } from "@/composables/use-toast.js";
+import { useModalStack } from "@/composables/use-modal-stack.js";
 import { useAuthStore } from "@/stores/auth.store.js";
 
 const { authenticatedFetch } = useApi();
@@ -43,8 +44,6 @@ const employees = ref<Employee[]>([]);
 const showModal = ref(false);
 const { showToast, toastMessage, toastType, toast } = useToast();
 const { showConfirm, confirmTitle, confirmMessage, confirmLabel, confirm, onConfirm, onCancel } = useConfirm();
-const modalRef = ref<HTMLElement | null>(null);
-const lastFocusedElement = ref<HTMLElement | null>(null);
 const isEditMode = ref(false);
 const editingId = ref<string | null>(null);
 const loading = ref(false);
@@ -123,7 +122,6 @@ function validateForm(): boolean {
 }
 
 function openCreateModal(): void {
-  lastFocusedElement.value = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   isEditMode.value = false;
   editingId.value = null;
   formData.value = {
@@ -137,11 +135,9 @@ function openCreateModal(): void {
   };
   formErrors.value = {};
   showModal.value = true;
-  focusFirstModalField();
 }
 
 function openEditModal(employee: Employee): void {
-  lastFocusedElement.value = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   isEditMode.value = true;
   editingId.value = employee.id;
   formData.value = {
@@ -155,7 +151,6 @@ function openEditModal(employee: Employee): void {
   };
   formErrors.value = {};
   showModal.value = true;
-  focusFirstModalField();
 }
 
 function closeModal(): void {
@@ -170,51 +165,11 @@ function closeModal(): void {
     is_active: true,
   };
   formErrors.value = {};
-  lastFocusedElement.value?.focus();
 }
 
-async function focusFirstModalField(): Promise<void> {
-  await nextTick();
-  const firstFocusable = modalRef.value?.querySelector<HTMLElement>(
-    "input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])",
-  );
-  firstFocusable?.focus();
-}
+useModalStack([{ isOpen: showModal, close: closeModal }]);
 
-function handleModalKeydown(event: KeyboardEvent): void {
-  if (event.key === "Escape") {
-    closeModal();
-    return;
-  }
 
-  if (event.key !== "Tab" || !modalRef.value) {
-    return;
-  }
-
-  const focusableElements = Array.from(
-    modalRef.value.querySelectorAll<HTMLElement>(
-      "input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])",
-    ),
-  ).filter((element) => !element.hasAttribute("aria-hidden"));
-
-  if (focusableElements.length === 0) {
-    return;
-  }
-
-  const first = focusableElements[0];
-  const last = focusableElements[focusableElements.length - 1];
-
-  if (event.shiftKey && document.activeElement === first) {
-    event.preventDefault();
-    last?.focus();
-    return;
-  }
-
-  if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault();
-    first?.focus();
-  }
-}
 
 function showSuccessToast(message: string): void {
   toast(message);
@@ -321,8 +276,7 @@ async function toggleStatus(employee: Employee): Promise<void> {
     <div class="flex flex-1 flex-col">
       <AppHeader />
       <main class="flex-1 p-6">
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h1 class="text-2xl font-bold text-gray-900 sm:text-3xl">Funcionários</h1>
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
           <button
             @click="openCreateModal"
             class="min-h-11 w-full rounded-lg bg-primary px-4 text-sm font-medium text-white transition hover:bg-primary-dark sm:w-auto"
@@ -467,13 +421,11 @@ async function toggleStatus(employee: Employee): Promise<void> {
         <!-- Modal -->
         <div
           v-if="showModal"
-          ref="modalRef"
           class="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 backdrop-blur-sm sm:items-center sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="employee-modal-title"
           @click.self="closeModal"
-          @keydown="handleModalKeydown"
         >
           <div class="relative max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:max-w-md sm:rounded-2xl">
             <div class="mx-auto mt-3 h-1 w-12 rounded-full bg-gray-200 sm:hidden" aria-hidden="true" />

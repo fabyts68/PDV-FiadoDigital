@@ -9,6 +9,7 @@ import { useConfirm } from "@/composables/use-confirm.js";
 import { useFormatting } from "@/composables/use-formatting.js";
 import { useToast } from "@/composables/use-toast.js";
 import { useAuthStore } from "@/stores/auth.store.js";
+import { useModalStack } from "@/composables/use-modal-stack.js";
 import { useProductStore } from "@/stores/product.store.js";
 
 type TabKey = "products" | "product-types" | "prices";
@@ -80,10 +81,19 @@ const activeTab = ref<TabKey>("products");
 const products = ref<Product[]>([]);
 const loadingProducts = ref(false);
 const productsError = ref<string | null>(null);
+const productsCurrentPage = ref(1);
+const productsPerPage = ref(10);
+const searchQuery = ref("");
 
 const productTypes = ref<ProductType[]>([]);
 const loadingProductTypes = ref(false);
 const productTypesError = ref<string | null>(null);
+const productTypesCurrentPage = ref(1);
+const productTypesPerPage = ref(10);
+const productTypesSearchQuery = ref("");
+const pricesCurrentPage = ref(1);
+const pricesPerPage = ref(10);
+const pricesSearchQuery = ref("");
 
 const brands = ref<Brand[]>([]);
 const loadingBrands = ref(false);
@@ -227,7 +237,17 @@ const displayedSalePriceInput = computed(() => {
 const sortedProducts = computed(() => {
   const direction = productSort.value.direction === "asc" ? 1 : -1;
 
-  return [...products.value].sort((left, right) => {
+  let filtered = products.value;
+  if (searchQuery.value.trim()) {
+    const term = searchQuery.value.toLowerCase();
+    filtered = filtered.filter((p) =>
+      p.name.toLowerCase().includes(term) ||
+      (p.barcode && p.barcode.includes(term)) ||
+      (p.brand?.name && p.brand.name.toLowerCase().includes(term))
+    );
+  }
+
+  return [...filtered].sort((left, right) => {
     switch (productSort.value.key) {
       case "name":
         return direction * left.name.localeCompare(right.name, "pt-BR");
@@ -252,7 +272,13 @@ const sortedProducts = computed(() => {
 const sortedProductTypes = computed(() => {
   const direction = productTypeSort.value.direction === "asc" ? 1 : -1;
 
-  return [...productTypes.value].sort((left, right) => {
+  let filtered = productTypes.value;
+  if (productTypesSearchQuery.value.trim()) {
+    const term = productTypesSearchQuery.value.toLowerCase();
+    filtered = filtered.filter((t) => t.name.toLowerCase().includes(term));
+  }
+
+  return [...filtered].sort((left, right) => {
     if (productTypeSort.value.key === "name") {
       return direction * left.name.localeCompare(right.name, "pt-BR");
     }
@@ -263,10 +289,26 @@ const sortedProductTypes = computed(() => {
   });
 });
 
+const paginatedProductTypes = computed(() => {
+  const start = (productTypesCurrentPage.value - 1) * productTypesPerPage.value;
+  const end = start + productTypesPerPage.value;
+  return sortedProductTypes.value.slice(start, end);
+});
+
 const sortedProductsForPrices = computed(() => {
   const direction = priceSort.value.direction === "asc" ? 1 : -1;
 
-  return [...products.value].sort((left, right) => {
+  let filtered = products.value;
+  if (pricesSearchQuery.value.trim()) {
+    const term = pricesSearchQuery.value.toLowerCase();
+    filtered = filtered.filter((p) =>
+      p.name.toLowerCase().includes(term) ||
+      (p.barcode && p.barcode.includes(term)) ||
+      (p.brand?.name && p.brand.name.toLowerCase().includes(term))
+    );
+  }
+
+  return [...filtered].sort((left, right) => {
     switch (priceSort.value.key) {
       case "name":
         return direction * left.name.localeCompare(right.name, "pt-BR");
@@ -282,14 +324,29 @@ const sortedProductsForPrices = computed(() => {
       }
       case "cost":
         return direction * (left.cost_price_cents - right.cost_price_cents);
-      case "margin":
-        return direction * ((left.profit_margin ?? -1) - (right.profit_margin ?? -1));
+      case "margin": {
+        const leftMargin = left.profit_margin !== null ? left.profit_margin : (left.product_type?.profit_margin ?? -1);
+        const rightMargin = right.profit_margin !== null ? right.profit_margin : (right.product_type?.profit_margin ?? -1);
+        return direction * (leftMargin - rightMargin);
+      }
       case "sale":
         return direction * (left.price_cents - right.price_cents);
       case "stock":
         return direction * (left.stock_quantity - right.stock_quantity);
     }
   });
+});
+
+const paginatedProducts = computed(() => {
+  const start = (productsCurrentPage.value - 1) * productsPerPage.value;
+  const end = start + productsPerPage.value;
+  return sortedProducts.value.slice(start, end);
+});
+
+const paginatedProductsForPrices = computed(() => {
+  const start = (pricesCurrentPage.value - 1) * pricesPerPage.value;
+  const end = start + pricesPerPage.value;
+  return sortedProductsForPrices.value.slice(start, end);
 });
 
 const normalizedStockAddition = computed(() => {
@@ -344,6 +401,14 @@ const bulkCalculatedPriceCents = computed(() => {
   return Math.round(bulkAverageCostCents.value / (1 - margin / 100));
 });
 
+const sortedProductTypesForBulk = computed(() => {
+  return [...productTypes.value].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+});
+
+const sortedBulkBrands = computed(() => {
+  return [...bulkBrands.value].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+});
+
 const weightUnitOptions: Array<{ label: string; value: WeightUnit }> = [
   { label: "Quilograma (kg)", value: "kg" },
   { label: "Grama (g)", value: "g" },
@@ -358,12 +423,21 @@ onMounted(async () => {
   if (!isAdmin.value && activeTab.value === "prices") {
     activeTab.value = "products";
   }
-
-  window.addEventListener("keydown", handleEscapeKey);
 });
 
 onUnmounted(() => {
-  window.removeEventListener("keydown", handleEscapeKey);
+});
+
+watch([productsPerPage, searchQuery], () => {
+  productsCurrentPage.value = 1;
+});
+
+watch([productTypesPerPage, productTypesSearchQuery], () => {
+  productTypesCurrentPage.value = 1;
+});
+
+watch([pricesPerPage, pricesSearchQuery], () => {
+  pricesCurrentPage.value = 1;
 });
 
 watch(
@@ -384,35 +458,7 @@ watch(
   },
 );
 
-function handleEscapeKey(event: KeyboardEvent): void {
-  if (event.key !== "Escape") {
-    return;
-  }
 
-  if (showSinglePriceModal.value) {
-    closeSinglePriceModal();
-    return;
-  }
-
-  if (showBulkPriceModal.value) {
-    closeBulkPriceModal();
-    return;
-  }
-
-  if (showProductModal.value) {
-    closeProductModal();
-    return;
-  }
-
-  if (showStockModal.value) {
-    closeStockModal();
-    return;
-  }
-
-  if (showProductTypeModal.value) {
-    closeProductTypeModal();
-  }
-}
 
 function showSuccessToast(message: string): void {
   toast(message);
@@ -435,7 +481,8 @@ function formatWeight(product: Product): string {
 }
 
 function formatMargin(product: Product): string {
-  return formatProfitMargin(product.profit_margin);
+  const margin = product.profit_margin !== null ? product.profit_margin : (product.product_type?.profit_margin ?? null);
+  return formatProfitMargin(margin);
 }
 
 function formatStock(quantity: number, isBulk: boolean): string {
@@ -785,7 +832,7 @@ function validateProductForm(): boolean {
   }
 
   if (!isProductEditMode.value) {
-    const initialQuantity = Number.parseFloat(data.stock_quantity.replace(",", "."));
+    const initialQuantity = Number.parseFloat(String(data.stock_quantity).replace(",", "."));
 
     if (Number.isNaN(initialQuantity) || initialQuantity < 0) {
       productFormErrors.value.stock_quantity = ["Quantidade inicial deve ser não-negativa"];
@@ -857,7 +904,7 @@ async function submitProductForm(): Promise<void> {
   }
 
   if (!isProductEditMode.value) {
-    payload.stock_quantity = Number.parseFloat(productFormData.value.stock_quantity.replace(",", "."));
+    payload.stock_quantity = Number.parseFloat(String(productFormData.value.stock_quantity).replace(",", "."));
   }
 
   try {
@@ -1249,6 +1296,10 @@ function handleBulkMarginInput(event: Event): void {
     return;
   }
 
+  if (normalized !== "" && Number.parseFloat(normalized) > 100) {
+    return;
+  }
+
   bulkPriceFormData.value.margin_percentage = normalized;
 }
 
@@ -1262,8 +1313,8 @@ async function submitBulkPrice(): Promise<void> {
     return;
   }
 
-  if (Number.isNaN(margin) || margin < 1 || margin > 99) {
-    bulkPriceError.value = "Margem deve estar entre 1 e 99.";
+  if (Number.isNaN(margin) || margin < 0 || margin > 100) {
+    bulkPriceError.value = "Margem deve estar entre 0 e 100.";
     return;
   }
 
@@ -1318,6 +1369,17 @@ function closeSinglePriceModal(): void {
   singlePriceError.value = null;
   singlePriceProduct.value = null;
 }
+
+useModalStack(
+  [
+    { isOpen: showProductModal, close: closeProductModal },
+    { isOpen: showStockModal, close: closeStockModal },
+    { isOpen: showProductTypeModal, close: closeProductTypeModal },
+    { isOpen: showBulkPriceModal, close: closeBulkPriceModal },
+    { isOpen: showSinglePriceModal, close: closeSinglePriceModal },
+  ],
+  { listenEscape: true },
+);
 
 function recalculateSaleFromMargin(): void {
   const costCents = parseCurrencyInputToCents(singleCostInput.value);
@@ -1446,12 +1508,10 @@ async function submitSinglePrice(): Promise<void> {
     <div class="flex flex-1 flex-col">
       <AppHeader />
       <main class="flex-1 p-6">
-        <div class="flex flex-wrap items-center justify-between gap-4">
-          <h1 class="text-3xl font-bold text-gray-900">Gerenciamento de Produtos</h1>
-        </div>
+
 
         <div class="mt-6 -mx-3 overflow-x-auto px-3 md:mx-0 md:px-0">
-          <div class="mb-6 flex min-w-max gap-1 border-b border-gray-200 md:min-w-0">
+          <div class="mb-6 flex overflow-x-auto whitespace-nowrap gap-1 border-b border-gray-200">
             <button
               type="button"
               class="-mb-px min-h-11 whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium transition-colors"
@@ -1505,6 +1565,33 @@ async function submitSinglePrice(): Promise<void> {
                 + Entrada de Estoque
               </button>
             </div>
+
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div class="flex items-center justify-end gap-2">
+                <label for="productsPerPage" class="text-sm text-gray-700 whitespace-nowrap">Itens por página:</label>
+                <select
+                  id="productsPerPage"
+                  v-model="productsPerPage"
+                  class="rounded-md border border-gray-300 bg-white py-1.5 px-3 text-sm text-gray-900 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option :value="5">5</option>
+                  <option :value="10">10</option>
+                  <option :value="20">20</option>
+                  <option :value="50">50</option>
+                </select>
+              </div>
+              <div class="relative w-full sm:w-64">
+                <input
+                  v-model="searchQuery"
+                  type="text"
+                  placeholder="Buscar produtos..."
+                  class="w-full min-h-[38px] rounded border border-gray-300 px-3 py-1.5 pr-9 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+                <svg class="absolute right-3 top-2.5 h-4 w-4 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+            </div>
           </div>
 
           <div v-if="loadingProducts" class="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
@@ -1534,55 +1621,65 @@ async function submitSinglePrice(): Promise<void> {
           </div>
 
           <div v-else>
-            <div class="hidden overflow-x-auto rounded-lg border border-gray-200 bg-white md:block">
-              <table class="w-full min-w-[1180px]">
+            <!-- Controles removidos (passou pro cabeçalho) -->
+
+            <div class="hidden w-full overflow-x-auto rounded-lg border border-gray-200 bg-white md:block">
+              <table class="w-full table-auto min-w-[820px]">
                 <caption class="sr-only">Lista de produtos cadastrados</caption>
                 <thead class="bg-gray-50">
                   <tr>
-                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Código de Barras</th>
-                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                    <th scope="col" class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-left text-xs lg:text-sm 2xl:text-base font-semibold text-gray-700 whitespace-nowrap">Cód. Barras</th>
+                    <th scope="col" class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-left text-xs lg:text-sm 2xl:text-base font-semibold text-gray-700">
                       <button type="button" class="inline-flex items-center gap-1" @click="toggleProductSort('name')">
                         Nome
                         <span>{{ getSortIndicator(productSort, 'name') }}</span>
                       </button>
                     </th>
-                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                    <th scope="col" class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-left text-xs lg:text-sm 2xl:text-base font-semibold text-gray-700">
                       <button type="button" class="inline-flex items-center gap-1" @click="toggleProductSort('brand')">
                         Marca
                         <span>{{ getSortIndicator(productSort, 'brand') }}</span>
                       </button>
                     </th>
-                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">Gramagem</th>
-                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                    <th scope="col" class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-left text-xs lg:text-sm 2xl:text-base font-semibold text-gray-700 whitespace-nowrap">Gram.</th>
+                    <th scope="col" class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-left text-xs lg:text-sm 2xl:text-base font-semibold text-gray-700">
                       <button type="button" class="inline-flex items-center gap-1" @click="toggleProductSort('type')">
                         Tipo
                         <span>{{ getSortIndicator(productSort, 'type') }}</span>
                       </button>
                     </th>
-                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                    <th scope="col" class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-left text-xs lg:text-sm 2xl:text-base font-semibold text-gray-700 whitespace-nowrap">
                       <button type="button" class="inline-flex items-center gap-1" @click="toggleProductSort('price')">
                         Preço
                         <span>{{ getSortIndicator(productSort, 'price') }}</span>
                       </button>
                     </th>
-                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                    <th scope="col" class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-left text-xs lg:text-sm 2xl:text-base font-semibold text-gray-700 whitespace-nowrap">
                       <button type="button" class="inline-flex items-center gap-1" @click="toggleProductSort('stock')">
                         Estoque
                         <span>{{ getSortIndicator(productSort, 'stock') }}</span>
                       </button>
                     </th>
-                    <th scope="col" class="px-6 py-3 text-center text-sm font-semibold text-gray-700">Ações</th>
+                    <th scope="col" class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-center text-xs lg:text-sm 2xl:text-base font-semibold text-gray-700 whitespace-nowrap">Ações</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-200">
-                  <tr v-for="product in sortedProducts" :key="product.id" class="hover:bg-gray-50">
-                    <td class="px-6 py-4 text-sm text-gray-700">{{ product.barcode ?? "-" }}</td>
-                    <td class="px-6 py-4 text-sm text-gray-900">{{ product.name }}</td>
-                    <td class="px-6 py-4 text-sm text-gray-600">{{ product.brand?.name ?? "—" }}</td>
-                    <td class="px-6 py-4 text-sm text-gray-600">{{ formatWeight(product) }}</td>
-                    <td class="px-6 py-4 text-sm text-gray-600">{{ product.product_type?.name ?? "-" }}</td>
-                    <td class="px-6 py-4 text-sm text-gray-600">{{ formatCents(product.price_cents) }}</td>
-                    <td class="px-6 py-4 text-sm">
+                  <tr v-for="product in paginatedProducts" :key="product.id" class="hover:bg-gray-50">
+                    <td class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-xs lg:text-sm 2xl:text-base text-gray-700 whitespace-nowrap">
+                      {{ product.barcode ?? "-" }}
+                    </td>
+                    <td class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-xs lg:text-sm 2xl:text-base text-gray-900">
+                      {{ product.name }}
+                    </td>
+                    <td class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-xs lg:text-sm 2xl:text-base text-gray-600">
+                      <span class="block truncate">{{ product.brand?.name ?? "—" }}</span>
+                    </td>
+                    <td class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-xs lg:text-sm 2xl:text-base text-gray-600">{{ formatWeight(product) }}</td>
+                    <td class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-xs lg:text-sm 2xl:text-base text-gray-600">
+                      <span class="block truncate">{{ product.product_type?.name ?? "-" }}</span>
+                    </td>
+                    <td class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-xs lg:text-sm 2xl:text-base text-gray-600 whitespace-nowrap">{{ formatCents(product.price_cents) }}</td>
+                    <td class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-xs lg:text-sm 2xl:text-base whitespace-nowrap">
                       <span
                         :class="[
                           'font-semibold',
@@ -1592,11 +1689,11 @@ async function submitSinglePrice(): Promise<void> {
                         {{ formatStock(product.stock_quantity, product.is_bulk) }}
                       </span>
                     </td>
-                    <td class="px-6 py-4 text-center">
+                    <td class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-center whitespace-nowrap">
                       <button
                         type="button"
                         aria-label="Editar produto"
-                        class="rounded p-2 text-primary transition hover:bg-gray-100"
+                        class="rounded p-1.5 text-primary transition hover:bg-gray-100"
                         @click="openEditProductModal(product)"
                       >
                         ⚙️
@@ -1609,7 +1706,7 @@ async function submitSinglePrice(): Promise<void> {
 
             <ul class="space-y-2 md:hidden">
               <li
-                v-for="product in sortedProducts"
+                v-for="product in paginatedProducts"
                 :key="product.id"
                 class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
               >
@@ -1672,18 +1769,76 @@ async function submitSinglePrice(): Promise<void> {
                 Nenhum produto encontrado.
               </li>
             </ul>
+
+            <!-- Controles de Paginação -->
+            <div
+              v-if="sortedProducts.length > 0"
+              class="mt-4 flex items-center justify-center border-t border-gray-200 pt-4 sm:justify-end"
+            >
+              <div class="flex items-center gap-4">
+                <button
+                  type="button"
+                  class="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  :disabled="productsCurrentPage === 1"
+                  @click="productsCurrentPage--"
+                >
+                  Anterior
+                </button>
+                <span class="text-sm text-gray-700">
+                  Página <span class="font-medium">{{ productsCurrentPage }}</span> de
+                  <span class="font-medium">{{ Math.ceil(sortedProducts.length / productsPerPage) || 1 }}</span>
+                </span>
+                <button
+                  type="button"
+                  class="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  :disabled="productsCurrentPage >= Math.ceil(sortedProducts.length / productsPerPage) || sortedProducts.length === 0"
+                  @click="productsCurrentPage++"
+                >
+                  Próximo
+                </button>
+              </div>
+            </div>
           </div>
         </section>
 
         <section v-if="activeTab === 'product-types' && canManageProductTypes" class="mt-6">
-          <div class="mb-4 flex items-center justify-end">
-            <button
-              type="button"
-              class="rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark"
-              @click="openCreateProductTypeModal"
-            >
-              + Novo Tipo
-            </button>
+          <div class="mb-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div class="flex">
+              <button
+                type="button"
+                class="min-h-11 rounded bg-primary px-4 text-sm font-medium text-white transition hover:bg-primary-dark"
+                @click="openCreateProductTypeModal"
+              >
+                + Novo Tipo
+              </button>
+            </div>
+
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div class="flex items-center justify-end gap-2">
+                <label for="productTypesPerPage" class="text-sm text-gray-700 whitespace-nowrap">Itens por página:</label>
+                <select
+                  id="productTypesPerPage"
+                  v-model="productTypesPerPage"
+                  class="rounded-md border border-gray-300 bg-white py-1.5 px-3 text-sm text-gray-900 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option :value="5">5</option>
+                  <option :value="10">10</option>
+                  <option :value="20">20</option>
+                  <option :value="50">50</option>
+                </select>
+              </div>
+              <div class="relative w-full sm:w-64">
+                <input
+                  v-model="productTypesSearchQuery"
+                  type="text"
+                  placeholder="Buscar tipos..."
+                  class="w-full min-h-[38px] rounded border border-gray-300 px-3 py-1.5 pr-9 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+                <svg class="absolute right-3 top-2.5 h-4 w-4 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+            </div>
           </div>
 
           <div v-if="loadingProductTypes" class="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
@@ -1713,18 +1868,20 @@ async function submitSinglePrice(): Promise<void> {
           </div>
 
           <div v-else>
+            <!-- Controles removidos (passou pro cabeçalho) -->
+
             <div class="hidden overflow-x-auto rounded-lg border border-gray-200 bg-white md:block">
-              <table class="w-full min-w-[640px]">
+              <table class="w-full table-auto min-w-[640px]">
                 <caption class="sr-only">Lista de tipos de produto cadastrados</caption>
                 <thead class="bg-gray-50">
                   <tr>
-                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                    <th scope="col" class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-left text-xs lg:text-sm 2xl:text-base font-semibold text-gray-700">
                       <button type="button" class="inline-flex items-center gap-1" @click="toggleProductTypeSort('name')">
                         Nome
                         <span>{{ getSortIndicator(productTypeSort, 'name') }}</span>
                       </button>
                     </th>
-                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                    <th scope="col" class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-left text-xs lg:text-sm 2xl:text-base font-semibold text-gray-700 whitespace-nowrap">
                       <button
                         type="button"
                         class="inline-flex items-center gap-1"
@@ -1734,19 +1891,19 @@ async function submitSinglePrice(): Promise<void> {
                         <span>{{ getSortIndicator(productTypeSort, 'profit_margin') }}</span>
                       </button>
                     </th>
-                    <th scope="col" class="px-6 py-3 text-center text-sm font-semibold text-gray-700">Ações</th>
+                    <th scope="col" class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-center text-xs lg:text-sm 2xl:text-base font-semibold text-gray-700 whitespace-nowrap">Ações</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-200">
-                  <tr v-for="item in sortedProductTypes" :key="item.id" class="hover:bg-gray-50">
-                    <td class="px-6 py-4 text-sm text-gray-900">{{ item.name }}</td>
-                    <td class="px-6 py-4 text-sm text-gray-700">{{ formatProfitMargin(item.profit_margin) }}</td>
-                    <td class="px-6 py-4">
+                  <tr v-for="item in paginatedProductTypes" :key="item.id" class="hover:bg-gray-50">
+                    <td class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-xs lg:text-sm 2xl:text-base text-gray-900">{{ item.name }}</td>
+                    <td class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-xs lg:text-sm 2xl:text-base text-gray-700 whitespace-nowrap">{{ formatProfitMargin(item.profit_margin) }}</td>
+                    <td class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-center whitespace-nowrap">
                       <div class="flex items-center justify-center gap-2">
                         <button
                           type="button"
                           aria-label="Editar tipo"
-                          class="rounded p-2 text-primary transition hover:bg-gray-100"
+                          class="rounded p-1.5 text-primary transition hover:bg-gray-100"
                           @click="openEditProductTypeModal(item)"
                         >
                           ✏️
@@ -1754,7 +1911,7 @@ async function submitSinglePrice(): Promise<void> {
                         <button
                           type="button"
                           aria-label="Desativar tipo"
-                          class="rounded p-2 text-danger transition hover:bg-red-50"
+                          class="rounded p-1.5 text-danger transition hover:bg-red-50"
                           @click="deactivateProductType(item.id)"
                         >
                           🗑️
@@ -1768,7 +1925,7 @@ async function submitSinglePrice(): Promise<void> {
 
             <ul class="space-y-2 md:hidden">
               <li
-                v-for="item in sortedProductTypes"
+                v-for="item in paginatedProductTypes"
                 :key="item.id"
                 class="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm"
               >
@@ -1802,18 +1959,76 @@ async function submitSinglePrice(): Promise<void> {
                 </div>
               </li>
             </ul>
+
+            <!-- Controles de Paginação -->
+            <div
+              v-if="sortedProductTypes.length > 0"
+              class="mt-4 flex items-center justify-center border-t border-gray-200 pt-4 sm:justify-end"
+            >
+              <div class="flex items-center gap-4">
+                <button
+                  type="button"
+                  class="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  :disabled="productTypesCurrentPage === 1"
+                  @click="productTypesCurrentPage--"
+                >
+                  Anterior
+                </button>
+                <span class="text-sm text-gray-700">
+                  Página <span class="font-medium">{{ productTypesCurrentPage }}</span> de
+                  <span class="font-medium">{{ Math.ceil(sortedProductTypes.length / productTypesPerPage) || 1 }}</span>
+                </span>
+                <button
+                  type="button"
+                  class="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  :disabled="productTypesCurrentPage >= Math.ceil(sortedProductTypes.length / productTypesPerPage) || sortedProductTypes.length === 0"
+                  @click="productTypesCurrentPage++"
+                >
+                  Próximo
+                </button>
+              </div>
+            </div>
           </div>
         </section>
 
         <section v-if="activeTab === 'prices' && (isAdmin || canManageProductTypes)" class="mt-6">
-          <div class="mb-4 flex justify-end">
-            <button
-              type="button"
-              class="rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark"
-              @click="openBulkPriceModal"
-            >
-              Definir Margem de Lucro
-            </button>
+          <div class="mb-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div class="flex">
+              <button
+                type="button"
+                class="min-h-11 rounded bg-primary px-4 text-sm font-medium text-white transition hover:bg-primary-dark"
+                @click="openBulkPriceModal"
+              >
+                Definir Margem de Lucro
+              </button>
+            </div>
+
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div class="flex items-center justify-end gap-2">
+                <label for="pricesPerPage" class="text-sm text-gray-700 whitespace-nowrap">Itens por página:</label>
+                <select
+                  id="pricesPerPage"
+                  v-model="pricesPerPage"
+                  class="rounded-md border border-gray-300 bg-white py-1.5 px-3 text-sm text-gray-900 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option :value="5">5</option>
+                  <option :value="10">10</option>
+                  <option :value="20">20</option>
+                  <option :value="50">50</option>
+                </select>
+              </div>
+              <div class="relative w-full sm:w-64">
+                <input
+                  v-model="pricesSearchQuery"
+                  type="text"
+                  placeholder="Buscar preços..."
+                  class="w-full min-h-[38px] rounded border border-gray-300 px-3 py-1.5 pr-9 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+                <svg class="absolute right-3 top-2.5 h-4 w-4 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+            </div>
           </div>
 
           <div v-if="loadingProducts" class="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
@@ -1821,65 +2036,73 @@ async function submitSinglePrice(): Promise<void> {
           </div>
 
           <div v-else>
-            <div class="hidden overflow-x-auto rounded-lg border border-gray-200 bg-white md:block">
-              <table class="w-full min-w-[1120px]">
+            <!-- Controles removidos (passou pro cabeçalho) -->
+
+            <div class="hidden w-full overflow-x-auto rounded-lg border border-gray-200 bg-white md:block">
+              <table class="w-full table-auto min-w-[780px]">
                 <caption class="sr-only">Tabela de precos e margens dos produtos</caption>
                 <thead class="bg-gray-50">
                   <tr>
-                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                    <th scope="col" class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-left text-xs lg:text-sm 2xl:text-base font-semibold text-gray-700">
                       <button type="button" class="inline-flex items-center gap-1" @click="togglePriceSort('name')">
                         Nome
                         <span>{{ getSortIndicator(priceSort, 'name') }}</span>
                       </button>
                     </th>
-                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                    <th scope="col" class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-left text-xs lg:text-sm 2xl:text-base font-semibold text-gray-700">
                       <button type="button" class="inline-flex items-center gap-1" @click="togglePriceSort('type')">
                         Tipo
                         <span>{{ getSortIndicator(priceSort, 'type') }}</span>
                       </button>
                     </th>
-                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                    <th scope="col" class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-left text-xs lg:text-sm 2xl:text-base font-semibold text-gray-700">
                       <button type="button" class="inline-flex items-center gap-1" @click="togglePriceSort('brand')">
                         Marca
                         <span>{{ getSortIndicator(priceSort, 'brand') }}</span>
                       </button>
                     </th>
-                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                    <th scope="col" class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-left text-xs lg:text-sm 2xl:text-base font-semibold text-gray-700 whitespace-nowrap">
                       <button type="button" class="inline-flex items-center gap-1" @click="togglePriceSort('cost')">
                         Custo
                         <span>{{ getSortIndicator(priceSort, 'cost') }}</span>
                       </button>
                     </th>
-                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                    <th scope="col" class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-left text-xs lg:text-sm 2xl:text-base font-semibold text-gray-700 whitespace-nowrap">
                       <button type="button" class="inline-flex items-center gap-1" @click="togglePriceSort('margin')">
-                        Margem %
+                        Margem
                         <span>{{ getSortIndicator(priceSort, 'margin') }}</span>
                       </button>
                     </th>
-                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                    <th scope="col" class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-left text-xs lg:text-sm 2xl:text-base font-semibold text-gray-700 whitespace-nowrap">
                       <button type="button" class="inline-flex items-center gap-1" @click="togglePriceSort('sale')">
-                        Preço de Venda
+                        Venda
                         <span>{{ getSortIndicator(priceSort, 'sale') }}</span>
                       </button>
                     </th>
-                    <th scope="col" class="px-6 py-3 text-left text-sm font-semibold text-gray-700">
+                    <th scope="col" class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-left text-xs lg:text-sm 2xl:text-base font-semibold text-gray-700 whitespace-nowrap">
                       <button type="button" class="inline-flex items-center gap-1" @click="togglePriceSort('stock')">
                         Estoque
                         <span>{{ getSortIndicator(priceSort, 'stock') }}</span>
                       </button>
                     </th>
-                    <th scope="col" class="px-6 py-3 text-center text-sm font-semibold text-gray-700">Ações</th>
+                    <th scope="col" class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-center text-xs lg:text-sm 2xl:text-base font-semibold text-gray-700 whitespace-nowrap">Ações</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-200">
-                  <tr v-for="product in sortedProductsForPrices" :key="product.id" class="hover:bg-gray-50">
-                    <td class="px-6 py-4 text-sm text-gray-700">{{ product.name }}</td>
-                    <td class="px-6 py-4 text-sm text-gray-700">{{ product.product_type?.name ?? "-" }}</td>
-                    <td class="px-6 py-4 text-sm text-gray-700">{{ product.brand?.name ?? "—" }}</td>
-                    <td class="px-6 py-4 text-sm text-gray-700">{{ formatCents(product.cost_price_cents) }}</td>
-                    <td class="px-6 py-4 text-sm text-gray-700">{{ formatMargin(product) }}</td>
-                    <td class="px-6 py-4 text-sm text-gray-700">{{ formatCents(product.price_cents) }}</td>
-                    <td class="px-6 py-4 text-sm">
+                  <tr v-for="product in paginatedProductsForPrices" :key="product.id" class="hover:bg-gray-50">
+                    <td class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-xs lg:text-sm 2xl:text-base text-gray-700">
+                      {{ product.name }}
+                    </td>
+                    <td class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-xs lg:text-sm 2xl:text-base text-gray-700">
+                      <span class="block truncate">{{ product.product_type?.name ?? "-" }}</span>
+                    </td>
+                    <td class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-xs lg:text-sm 2xl:text-base text-gray-700">
+                      <span class="block truncate">{{ product.brand?.name ?? "—" }}</span>
+                    </td>
+                    <td class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-xs lg:text-sm 2xl:text-base text-gray-700 whitespace-nowrap">{{ formatCents(product.cost_price_cents) }}</td>
+                    <td class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-xs lg:text-sm 2xl:text-base text-gray-700 whitespace-nowrap">{{ formatMargin(product) }}</td>
+                    <td class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-xs lg:text-sm 2xl:text-base text-gray-700 whitespace-nowrap">{{ formatCents(product.price_cents) }}</td>
+                    <td class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-xs lg:text-sm 2xl:text-base whitespace-nowrap">
                       <span
                         :class="[
                           'font-semibold',
@@ -1889,11 +2112,11 @@ async function submitSinglePrice(): Promise<void> {
                         {{ formatStock(product.stock_quantity, product.is_bulk) }}
                       </span>
                     </td>
-                    <td class="px-6 py-4 text-center">
+                    <td class="px-2 py-2 lg:px-4 lg:py-3 2xl:px-6 2xl:py-4 text-center whitespace-nowrap">
                       <button
                         type="button"
                         aria-label="Editar preço"
-                        class="rounded p-2 text-primary transition hover:bg-gray-100"
+                        class="rounded p-1.5 text-primary transition hover:bg-gray-100"
                         @click="openSinglePriceModal(product)"
                       >
                         ⚙️
@@ -1906,7 +2129,7 @@ async function submitSinglePrice(): Promise<void> {
 
             <ul class="space-y-2 md:hidden">
               <li
-                v-for="product in sortedProductsForPrices"
+                v-for="product in paginatedProductsForPrices"
                 :key="product.id"
                 class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
               >
@@ -1942,288 +2165,336 @@ async function submitSinglePrice(): Promise<void> {
                 </div>
               </li>
             </ul>
+
+            <!-- Controles de Paginação -->
+            <div
+              v-if="sortedProductsForPrices.length > 0"
+              class="mt-4 flex items-center justify-center border-t border-gray-200 pt-4 sm:justify-end"
+            >
+              <div class="flex items-center gap-4">
+                <button
+                  type="button"
+                  class="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  :disabled="pricesCurrentPage === 1"
+                  @click="pricesCurrentPage--"
+                >
+                  Anterior
+                </button>
+                <span class="text-sm text-gray-700">
+                  Página <span class="font-medium">{{ pricesCurrentPage }}</span> de
+                  <span class="font-medium">{{ Math.ceil(sortedProductsForPrices.length / pricesPerPage) || 1 }}</span>
+                </span>
+                <button
+                  type="button"
+                  class="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  :disabled="pricesCurrentPage >= Math.ceil(sortedProductsForPrices.length / pricesPerPage) || sortedProductsForPrices.length === 0"
+                  @click="pricesCurrentPage++"
+                >
+                  Próximo
+                </button>
+              </div>
+            </div>
           </div>
         </section>
 
         <div
           v-if="showProductModal"
-          class="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4"
+          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="product-form-modal-title"
         >
-          <div class="absolute inset-0 bg-black/50" @click="closeProductModal" />
           <div
             ref="productModalScrollableRef"
-            class="relative z-10 w-full max-h-[92vh] overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:max-w-2xl sm:rounded-2xl"
+            class="relative z-10 flex h-full max-h-[95vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl"
           >
-            <div class="mx-auto mt-3 h-1 w-12 rounded-full bg-gray-200 sm:hidden" />
-            <div class="p-4 sm:p-6">
-            <div class="mb-4 flex items-center justify-between">
-              <h2 id="product-form-modal-title" class="text-xl font-bold text-gray-900">
-                {{ isProductEditMode ? "Editar Produto" : "Novo Produto" }}
-              </h2>
-              <button
-                type="button"
-                class="rounded-lg p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-600"
-                aria-label="Fechar modal"
-                @click="closeProductModal"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  class="h-6 w-6"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  stroke-width="2"
+            <!-- Cabeçalho -->
+            <div class="shrink-0 border-b border-gray-100 p-4 sm:p-6">
+              <div class="flex items-center justify-between">
+                <h2 id="product-form-modal-title" class="text-xl font-bold text-gray-900">
+                  {{ isProductEditMode ? "Editar Produto" : "Novo Produto" }}
+                </h2>
+                <button
+                  type="button"
+                  class="rounded-lg p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-600"
+                  aria-label="Fechar modal"
+                  @click="closeProductModal"
                 >
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <div
-              v-if="productFormErrors.submit"
-              class="mb-4 rounded bg-red-100 p-3 text-sm text-danger"
-              role="alert"
-            >
-              {{ productFormErrors.submit }}
-            </div>
-
-            <form
-              id="product-form"
-              class="grid grid-cols-1 gap-4 md:grid-cols-2"
-              novalidate
-              @submit.prevent="submitProductForm"
-            >
-              <div class="md:col-span-2">
-                <label for="product_name" class="mb-1 block text-sm font-medium text-gray-700">Nome *</label>
-                <input
-                  id="product_name"
-                  v-model="productFormData.name"
-                  type="text"
-                  autofocus
-                  maxlength="100"
-                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
-                <p v-if="productFormErrors.name" class="mt-1 text-xs text-danger">{{ productFormErrors.name[0] }}</p>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-6 w-6"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
               </div>
 
-              <div>
-                <label for="product_brand" class="mb-1 block text-sm font-medium text-gray-700">Marca</label>
-                <div class="flex gap-2">
-                  <select
-                    id="product_brand"
-                    v-model="productFormData.brand_id"
-                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  >
-                    <option value="">Sem marca</option>
-                    <option v-for="item in brands" :key="item.id" :value="item.id">
-                      {{ item.name }}
-                    </option>
-                  </select>
-                  <button
-                    type="button"
-                    aria-label="Cadastrar nova marca"
-                    class="rounded border border-primary px-3 py-2 text-sm font-semibold text-primary transition hover:bg-primary/10"
-                    @click="openInlineBrandCreate"
-                  >
-                    +
-                  </button>
-                </div>
-                <p v-if="brandsError" class="mt-1 text-xs text-danger">{{ brandsError }}</p>
-                <p v-if="productFormErrors.brand_id" class="mt-1 text-xs text-danger">{{ productFormErrors.brand_id[0] }}</p>
+              <div
+                v-if="productFormErrors.submit"
+                class="mt-4 rounded bg-red-100 p-3 text-sm text-danger"
+                role="alert"
+              >
+                {{ productFormErrors.submit }}
+              </div>
+            </div>
 
-                <div v-if="showInlineBrandCreate" class="mt-2 rounded border border-gray-200 bg-surface p-3">
-                  <label for="inline_brand_name" class="mb-1 block text-xs font-medium text-gray-700">Nova Marca</label>
+            <!-- Corpo do Formulário -->
+            <div class="flex-1 overflow-y-auto p-4 sm:p-6">
+              <form
+                id="product-form"
+                class="grid grid-cols-1 gap-4 md:grid-cols-2"
+                novalidate
+                @submit.prevent="submitProductForm"
+              >
+                <div class="md:col-span-2">
+                  <label for="product_name" class="mb-1 block text-sm font-medium text-gray-700">Nome *</label>
                   <input
-                    id="inline_brand_name"
-                    v-model="brandFormName"
+                    id="product_name"
+                    v-model="productFormData.name"
                     type="text"
+                    autofocus
                     maxlength="100"
                     class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                   />
-                  <p v-if="brandFormErrors.name" class="mt-1 text-xs text-danger">{{ brandFormErrors.name[0] }}</p>
-                  <p v-if="brandFormErrors.submit" class="mt-1 text-xs text-danger">{{ brandFormErrors.submit }}</p>
-                  <div class="mt-3 flex justify-end gap-2">
+                  <p v-if="productFormErrors.name" class="mt-1 text-xs text-danger">{{ productFormErrors.name[0] }}</p>
+                </div>
+
+                <div>
+                  <label for="product_brand" class="mb-1 block text-sm font-medium text-gray-700">Marca</label>
+                  <div class="flex gap-2">
+                    <select
+                      id="product_brand"
+                      v-model="productFormData.brand_id"
+                      class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    >
+                      <option value="">Sem marca</option>
+                      <option v-for="item in brands" :key="item.id" :value="item.id">
+                        {{ item.name }}
+                      </option>
+                    </select>
                     <button
                       type="button"
-                      class="min-h-11 inline-flex items-center justify-center rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50"
-                      @click="closeInlineBrandCreate"
+                      aria-label="Cadastrar nova marca"
+                      class="rounded border border-primary px-3 py-2 text-sm font-semibold text-primary transition hover:bg-primary/10"
+                      @click="openInlineBrandCreate"
                     >
-                      Cancelar
-                    </button>
-                    <button
-                      type="button"
-                      :disabled="loadingBrandSubmit"
-                      class="min-h-11 inline-flex items-center justify-center rounded bg-primary px-3 py-1.5 text-xs font-medium text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
-                      @click="submitInlineBrandCreate"
-                    >
-                      {{ loadingBrandSubmit ? "Salvando..." : "Salvar" }}
+                      +
                     </button>
                   </div>
+                  <p v-if="brandsError" class="mt-1 text-xs text-danger">{{ brandsError }}</p>
+                  <p v-if="productFormErrors.brand_id" class="mt-1 text-xs text-danger">{{ productFormErrors.brand_id[0] }}</p>
+
+                  <div v-if="showInlineBrandCreate" class="mt-2 rounded border border-gray-200 bg-surface p-3">
+                    <label for="inline_brand_name" class="mb-1 block text-xs font-medium text-gray-700">Nova Marca</label>
+                    <input
+                      id="inline_brand_name"
+                      v-model="brandFormName"
+                      type="text"
+                      maxlength="100"
+                      class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    />
+                    <p v-if="brandFormErrors.name" class="mt-1 text-xs text-danger">{{ brandFormErrors.name[0] }}</p>
+                    <p v-if="brandFormErrors.submit" class="mt-1 text-xs text-danger">{{ brandFormErrors.submit }}</p>
+                    <div class="mt-3 flex justify-end gap-2">
+                      <button
+                        type="button"
+                        class="min-h-11 inline-flex items-center justify-center rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50"
+                        @click="closeInlineBrandCreate"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        :disabled="loadingBrandSubmit"
+                        class="min-h-11 inline-flex items-center justify-center rounded bg-primary px-3 py-1.5 text-xs font-medium text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
+                        @click="submitInlineBrandCreate"
+                      >
+                        {{ loadingBrandSubmit ? "Salvando..." : "Salvar" }}
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              </div>
 
-              <div>
-                <label for="product_barcode" class="mb-1 block text-sm font-medium text-gray-700">Código de Barras</label>
-                <input
-                  id="product_barcode"
-                  :value="productFormData.barcode"
-                  type="text"
-                  inputmode="numeric"
-                  maxlength="13"
-                  placeholder="EAN-8 ou EAN-13"
-                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  @input="handleBarcodeInput"
-                />
-                <p v-if="productFormErrors.barcode" class="mt-1 text-xs text-danger">{{ productFormErrors.barcode[0] }}</p>
-              </div>
-
-              <div class="md:col-span-2">
-                <label for="product_description" class="mb-1 block text-sm font-medium text-gray-700">Descrição</label>
-                <textarea
-                  id="product_description"
-                  v-model="productFormData.description"
-                  maxlength="255"
-                  rows="2"
-                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                ></textarea>
-                <p v-if="productFormErrors.description" class="mt-1 text-xs text-danger">{{ productFormErrors.description[0] }}</p>
-              </div>
-
-              <div>
-                <label for="product_weight_unit" class="mb-1 block text-sm font-medium text-gray-700">Unidade de Gramagem</label>
-                <select
-                  id="product_weight_unit"
-                  :value="productFormData.weight_unit"
-                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  @change="handleWeightUnitChange"
-                >
-                  <option value="">Selecione</option>
-                  <option v-for="item in weightUnitOptions" :key="item.value" :value="item.value">
-                    {{ item.label }}
-                  </option>
-                </select>
-                <p v-if="productFormErrors.weight_unit" class="mt-1 text-xs text-danger">{{ productFormErrors.weight_unit[0] }}</p>
-              </div>
-
-              <div>
-                <label for="product_weight_value" class="mb-1 block text-sm font-medium text-gray-700">Gramagem</label>
-                <input
-                  id="product_weight_value"
-                  :value="productFormData.weight_value"
-                  type="text"
-                  inputmode="decimal"
-                  placeholder="Ex.: 500 ou 1.5"
-                  :disabled="productFormData.weight_unit === 'un' || productFormData.is_bulk"
-                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:bg-gray-100"
-                  @input="handleWeightValueInput"
-                />
-                <p v-if="productFormErrors.weight_value" class="mt-1 text-xs text-danger">{{ productFormErrors.weight_value[0] }}</p>
-              </div>
-
-              <div class="md:col-span-2 rounded border border-gray-200 bg-surface px-4 py-3">
-                <label class="inline-flex items-center gap-2 text-sm font-medium text-gray-700">
+                <div>
+                  <label for="product_barcode" class="mb-1 block text-sm font-medium text-gray-700">Código de Barras</label>
                   <input
-                    type="checkbox"
-                    :checked="productFormData.is_bulk"
-                    class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                    @change="handleBulkFlagChange"
+                    id="product_barcode"
+                    :value="productFormData.barcode"
+                    type="text"
+                    inputmode="numeric"
+                    maxlength="13"
+                    placeholder="EAN-8 ou EAN-13"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    @input="handleBarcodeInput"
                   />
-                  Produto a Granel
-                </label>
-                <p class="mt-1 text-xs text-gray-600">
-                  Marque se este produto é vendido por peso (ex.: carnes, queijos, frios).
-                </p>
-              </div>
+                  <p v-if="productFormErrors.barcode" class="mt-1 text-xs text-danger">{{ productFormErrors.barcode[0] }}</p>
+                </div>
 
-              <div>
-                <label for="product_type" class="mb-1 block text-sm font-medium text-gray-700">Tipo de Produto</label>
-                <select
-                  id="product_type"
-                  v-model="productFormData.product_type_id"
-                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                >
-                  <option value="">Sem tipo</option>
-                  <option v-for="item in productTypes" :key="item.id" :value="item.id">
-                    {{ item.name }}
-                  </option>
-                </select>
-              </div>
+                <div class="md:col-span-2">
+                  <label for="product_description" class="mb-1 block text-sm font-medium text-gray-700">Descrição</label>
+                  <textarea
+                    id="product_description"
+                    v-model="productFormData.description"
+                    maxlength="255"
+                    rows="1"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  ></textarea>
+                  <p v-if="productFormErrors.description" class="mt-1 text-xs text-danger">{{ productFormErrors.description[0] }}</p>
+                </div>
 
-              <div v-if="canViewSalePriceField">
-                <label for="product_price" class="mb-1 block text-sm font-medium text-gray-700">Preço de Venda</label>
-                <input
-                  id="product_price"
-                  :value="displayedSalePriceInput"
-                  type="text"
-                  inputmode="numeric"
-                  placeholder="R$ 0,00"
-                  :readonly="isSalePriceAutoCalculated"
-                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 read-only:cursor-not-allowed read-only:bg-gray-100"
-                  @input="handlePriceInput"
-                />
-                <p v-if="isSalePriceAutoCalculated" class="mt-1 text-xs text-gray-600">
-                  Valor calculado automaticamente pela margem do tipo selecionado.
-                </p>
-                <p v-if="productFormErrors.price_cents" class="mt-1 text-xs text-danger">{{ productFormErrors.price_cents[0] }}</p>
-              </div>
+                <div class="md:col-span-2 grid grid-cols-1 gap-4 md:grid-cols-3">
+                  <div>
+                    <label for="product_weight_unit" class="mb-1 block text-sm font-medium text-gray-700">Unidade de Gramagem</label>
+                    <select
+                      id="product_weight_unit"
+                      :value="productFormData.weight_unit"
+                      class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      @change="handleWeightUnitChange"
+                    >
+                      <option value="">Selecione</option>
+                      <option v-for="item in weightUnitOptions" :key="item.value" :value="item.value">
+                        {{ item.label }}
+                      </option>
+                    </select>
+                    <p v-if="productFormErrors.weight_unit" class="mt-1 text-xs text-danger">{{ productFormErrors.weight_unit[0] }}</p>
+                  </div>
 
-              <div v-if="canViewCostPrice">
-                <label for="product_cost_price" class="mb-1 block text-sm font-medium text-gray-700">Preço de Custo *</label>
-                <input
-                  id="product_cost_price"
-                  :value="productFormData.cost_price_input"
-                  type="text"
-                  inputmode="numeric"
-                  placeholder="R$ 0,00"
-                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  @input="handleCostPriceInput"
-                />
-                <p v-if="productFormErrors.cost_price_cents" class="mt-1 text-xs text-danger">{{ productFormErrors.cost_price_cents[0] }}</p>
-              </div>
+                  <div>
+                    <label for="product_weight_value" class="mb-1 block text-sm font-medium text-gray-700">Gramagem</label>
+                    <input
+                      id="product_weight_value"
+                      :value="productFormData.weight_value"
+                      type="text"
+                      inputmode="decimal"
+                      placeholder="Ex.: 500 ou 1.5"
+                      :disabled="productFormData.weight_unit === 'un' || productFormData.is_bulk"
+                      class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:bg-gray-100"
+                      @input="handleWeightValueInput"
+                    />
+                    <p v-if="productFormErrors.weight_value" class="mt-1 text-xs text-danger">{{ productFormErrors.weight_value[0] }}</p>
+                  </div>
 
-              <div>
-                <label for="product_stock" class="mb-1 block text-sm font-medium text-gray-700">Quantidade Inicial *</label>
-                <input
-                  id="product_stock"
-                  v-model="productFormData.stock_quantity"
-                  type="number"
-                  min="0"
-                  inputmode="numeric"
-                  :disabled="isProductEditMode"
-                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:bg-gray-100"
-                />
-                <p v-if="productFormErrors.stock_quantity" class="mt-1 text-xs text-danger">{{ productFormErrors.stock_quantity[0] }}</p>
-              </div>
+                  <div class="flex flex-col justify-end pb-1.5">
+                    <div class="group relative flex items-center gap-1.5">
+                      <label class="inline-flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          :checked="productFormData.is_bulk"
+                          class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                          @change="handleBulkFlagChange"
+                        />
+                        Produto a Granel
+                      </label>
+                      <div class="relative flex items-center">
+                        <span
+                          class="flex h-4 w-4 cursor-help items-center justify-center rounded-full border border-blue-500 text-[10px] font-bold text-blue-500 transition-colors hover:bg-blue-50"
+                        >
+                          ?
+                        </span>
+                        <!-- Tooltip -->
+                        <div class="absolute bottom-full left-1/2 mb-2 hidden w-48 -translate-x-1/2 rounded bg-gray-800 p-2 text-center text-[10px] leading-tight text-white shadow-xl z-50 group-hover:block">
+                          Marque se este produto é vendido por peso (ex.: carnes, queijos, frios).
+                          <div class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
-              <div>
-                <label for="product_min_stock" class="mb-1 block text-sm font-medium text-gray-700">Estoque Mínimo *</label>
-                <input
-                  id="product_min_stock"
-                  v-model="productFormData.min_stock_alert"
-                  type="number"
-                  min="0"
-                  inputmode="numeric"
-                  class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
-                <p v-if="productFormErrors.min_stock_alert" class="mt-1 text-xs text-danger">{{ productFormErrors.min_stock_alert[0] }}</p>
-              </div>
+                <div>
+                  <label for="product_type" class="mb-1 block text-sm font-medium text-gray-700">Tipo de Produto</label>
+                  <select
+                    id="product_type"
+                    v-model="productFormData.product_type_id"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                    <option value="">Sem tipo</option>
+                    <option v-for="item in productTypes" :key="item.id" :value="item.id">
+                      {{ item.name }}
+                    </option>
+                  </select>
+                </div>
 
-              <div class="md:col-span-2 flex justify-end gap-3 pt-4">
+                <div v-if="canViewSalePriceField">
+                  <label for="product_price" class="mb-1 block text-sm font-medium text-gray-700">Preço de Venda</label>
+                  <input
+                    id="product_price"
+                    :value="displayedSalePriceInput"
+                    type="text"
+                    inputmode="numeric"
+                    placeholder="R$ 0,00"
+                    :readonly="isSalePriceAutoCalculated"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 read-only:cursor-not-allowed read-only:bg-gray-100"
+                    @input="handlePriceInput"
+                  />
+                  <p v-if="isSalePriceAutoCalculated" class="mt-1 text-xs text-gray-600">
+                    Valor calculado automaticamente pela margem do tipo selecionado.
+                  </p>
+                  <p v-if="productFormErrors.price_cents" class="mt-1 text-xs text-danger">{{ productFormErrors.price_cents[0] }}</p>
+                </div>
+
+                <div v-if="canViewCostPrice">
+                  <label for="product_cost_price" class="mb-1 block text-sm font-medium text-gray-700">Preço de Custo *</label>
+                  <input
+                    id="product_cost_price"
+                    :value="productFormData.cost_price_input"
+                    type="text"
+                    inputmode="numeric"
+                    placeholder="R$ 0,00"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    @input="handleCostPriceInput"
+                  />
+                  <p v-if="productFormErrors.cost_price_cents" class="mt-1 text-xs text-danger">{{ productFormErrors.cost_price_cents[0] }}</p>
+                </div>
+
+                <div>
+                  <label for="product_stock" class="mb-1 block text-sm font-medium text-gray-700">Quantidade Inicial *</label>
+                  <input
+                    id="product_stock"
+                    v-model="productFormData.stock_quantity"
+                    type="number"
+                    min="0"
+                    inputmode="numeric"
+                    :disabled="isProductEditMode"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:bg-gray-100"
+                  />
+                  <p v-if="productFormErrors.stock_quantity" class="mt-1 text-xs text-danger">{{ productFormErrors.stock_quantity[0] }}</p>
+                </div>
+
+                <div>
+                  <label for="product_min_stock" class="mb-1 block text-sm font-medium text-gray-700">Estoque Mínimo *</label>
+                  <input
+                    id="product_min_stock"
+                    v-model="productFormData.min_stock_alert"
+                    type="number"
+                    min="0"
+                    inputmode="numeric"
+                    class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                  <p v-if="productFormErrors.min_stock_alert" class="mt-1 text-xs text-danger">{{ productFormErrors.min_stock_alert[0] }}</p>
+                </div>
+              </form>
+            </div>
+
+            <!-- Rodapé (Botões de Ação) -->
+            <div class="shrink-0 border-t border-gray-200 bg-white p-4">
+              <div class="flex justify-end gap-3">
                 <button
                   type="button"
-                  class="rounded border border-gray-300 px-4 py-2 font-medium text-gray-700 transition hover:bg-gray-50"
+                  class="min-h-11 rounded border border-gray-300 px-4 py-2 font-medium text-gray-700 transition hover:bg-gray-50"
                   @click="closeProductModal"
                 >
                   Cancelar
                 </button>
                 <button
-                  type="button"
+                  form="product-form"
+                  type="submit"
                   :disabled="loadingProductSubmit"
-                  class="flex items-center gap-2 rounded bg-primary px-4 py-2 font-medium text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
-                  @click="submitProductForm"
+                  class="min-h-11 flex items-center gap-2 rounded bg-primary px-6 py-2 font-medium text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <svg
                     v-if="loadingProductSubmit"
@@ -2235,10 +2506,9 @@ async function submitSinglePrice(): Promise<void> {
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
                   </svg>
-                  <span>{{ loadingProductSubmit ? "Salvando..." : "Salvar" }}</span>
+                  <span>{{ loadingProductSubmit ? "Salvando..." : "Salvar Produto" }}</span>
                 </button>
               </div>
-            </form>
             </div>
           </div>
         </div>
@@ -2251,9 +2521,9 @@ async function submitSinglePrice(): Promise<void> {
           aria-labelledby="product-stock-modal-title"
         >
           <div class="absolute inset-0 bg-black/50" @click="closeStockModal" />
-          <div class="relative z-10 w-full max-h-[92vh] overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:max-w-xl sm:rounded-2xl">
+          <div class="relative z-10 flex max-h-[85vh] w-full flex-col rounded-t-2xl bg-white shadow-xl sm:max-w-xl sm:rounded-2xl">
             <div class="mx-auto mt-3 h-1 w-12 rounded-full bg-gray-200 sm:hidden" />
-            <div class="p-4 sm:p-6">
+            <div class="flex min-h-0 flex-1 flex-col p-4 sm:p-6">
             <div class="mb-4 flex items-center justify-between">
               <h2 id="product-stock-modal-title" class="text-xl font-bold text-gray-900">Entrada de Estoque</h2>
               <button
@@ -2275,7 +2545,7 @@ async function submitSinglePrice(): Promise<void> {
               </button>
             </div>
 
-            <div class="space-y-4">
+            <div class="min-h-0 flex-1 overflow-y-auto pr-2 space-y-4">
               <div>
                 <label for="stock_barcode" class="mb-1 block text-sm font-medium text-gray-700">
                   Código de Barras
@@ -2397,8 +2667,9 @@ async function submitSinglePrice(): Promise<void> {
               <div v-if="stockSubmitError" class="rounded bg-red-100 p-3 text-sm text-danger" role="alert">
                 {{ stockSubmitError }}
               </div>
+            </div>
 
-              <div class="flex justify-end gap-3 pt-2">
+              <div class="flex shrink-0 justify-end gap-3 pt-4 mt-4 border-t border-gray-100">
                 <button
                   type="button"
                   class="rounded border border-gray-300 px-4 py-2 font-medium text-gray-700 transition hover:bg-gray-50"
@@ -2426,7 +2697,6 @@ async function submitSinglePrice(): Promise<void> {
                 </button>
               </div>
             </div>
-            </div>
           </div>
         </div>
 
@@ -2438,9 +2708,9 @@ async function submitSinglePrice(): Promise<void> {
           aria-labelledby="product-type-modal-title"
         >
           <div class="absolute inset-0 bg-black/50" @click="closeProductTypeModal" />
-          <div class="relative z-10 w-full max-h-[92vh] overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:max-w-md sm:rounded-2xl">
+          <div class="relative z-10 flex max-h-[85vh] w-full flex-col rounded-t-2xl bg-white shadow-xl sm:max-w-md sm:rounded-2xl">
             <div class="mx-auto mt-3 h-1 w-12 rounded-full bg-gray-200 sm:hidden" />
-            <div class="p-4 sm:p-6">
+            <div class="flex min-h-0 flex-1 flex-col p-4 sm:p-6">
             <div class="mb-4 flex items-center justify-between">
               <h2 id="product-type-modal-title" class="text-xl font-bold text-gray-900">
                 {{ isProductTypeEditMode ? "Editar Tipo de Produto" : "Novo Tipo de Produto" }}
@@ -2472,7 +2742,8 @@ async function submitSinglePrice(): Promise<void> {
               {{ productTypeFormErrors.submit }}
             </div>
 
-            <form class="space-y-4" novalidate @submit.prevent="submitProductTypeForm">
+            <form novalidate @submit.prevent="submitProductTypeForm">
+              <div class="min-h-0 flex-1 overflow-y-auto pr-2 space-y-4">
               <div>
                 <label for="product_type_name" class="mb-1 block text-sm font-medium text-gray-700">Nome *</label>
                 <input
@@ -2504,7 +2775,9 @@ async function submitSinglePrice(): Promise<void> {
                 </p>
               </div>
 
-              <div class="flex justify-end gap-3 pt-2">
+              </div>
+
+              <div class="flex shrink-0 justify-end gap-3 pt-4 border-t mt-4 border-gray-100">
                 <button
                   type="button"
                   class="rounded border border-gray-300 px-4 py-2 font-medium text-gray-700 transition hover:bg-gray-50"
@@ -2543,9 +2816,9 @@ async function submitSinglePrice(): Promise<void> {
           aria-labelledby="product-bulk-price-modal-title"
         >
           <div class="absolute inset-0 bg-black/50" @click="closeBulkPriceModal" />
-          <div class="relative z-10 w-full max-h-[92vh] overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:max-w-xl sm:rounded-2xl">
+          <div class="relative z-10 flex max-h-[85vh] w-full flex-col rounded-t-2xl bg-white shadow-xl sm:max-w-xl sm:rounded-2xl">
             <div class="mx-auto mt-3 h-1 w-12 rounded-full bg-gray-200 sm:hidden" />
-            <div class="p-4 sm:p-6">
+            <div class="flex min-h-0 flex-1 flex-col p-4 sm:p-6">
             <div class="mb-4 flex items-center justify-between">
               <h2 id="product-bulk-price-modal-title" class="text-xl font-bold text-gray-900">Definir Margem de Lucro</h2>
               <button
@@ -2567,7 +2840,7 @@ async function submitSinglePrice(): Promise<void> {
               </button>
             </div>
 
-            <div class="space-y-4">
+            <div class="min-h-0 flex-1 overflow-y-auto pr-2 space-y-4">
               <div>
                 <label for="bulk_product_type" class="mb-1 block text-sm font-medium text-gray-700">Tipo de Produto *</label>
                 <select
@@ -2577,7 +2850,7 @@ async function submitSinglePrice(): Promise<void> {
                   class="w-full rounded border border-gray-300 px-3 py-2 text-base md:text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                 >
                   <option value="">Selecione</option>
-                  <option v-for="item in productTypes" :key="item.id" :value="item.id">
+                  <option v-for="item in sortedProductTypesForBulk" :key="item.id" :value="item.id">
                     {{ item.name }}
                   </option>
                 </select>
@@ -2593,7 +2866,7 @@ async function submitSinglePrice(): Promise<void> {
                 >
                   <option v-if="!bulkPriceFormData.product_type_id" value="">Selecione um tipo primeiro</option>
                   <option v-else value="">Todas</option>
-                  <option v-for="item in bulkBrands" :key="item.id" :value="item.id">
+                  <option v-for="item in sortedBulkBrands" :key="item.id" :value="item.id">
                     {{ item.name }}
                   </option>
                 </select>
@@ -2636,7 +2909,7 @@ async function submitSinglePrice(): Promise<void> {
                 {{ bulkPriceError }}
               </div>
 
-              <div class="flex justify-end gap-3 pt-2">
+              <div class="flex shrink-0 justify-end gap-3 pt-2">
                 <button
                   type="button"
                   class="rounded border border-gray-300 px-4 py-2 font-medium text-gray-700 transition hover:bg-gray-50"
@@ -2676,9 +2949,9 @@ async function submitSinglePrice(): Promise<void> {
           aria-labelledby="product-single-price-modal-title"
         >
           <div class="absolute inset-0 bg-black/50" @click="closeSinglePriceModal" />
-          <div class="relative z-10 w-full max-h-[92vh] overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:max-w-md sm:rounded-2xl">
+          <div class="relative z-10 flex max-h-[85vh] w-full flex-col rounded-t-2xl bg-white shadow-xl sm:max-w-md sm:rounded-2xl">
             <div class="mx-auto mt-3 h-1 w-12 rounded-full bg-gray-200 sm:hidden" />
-            <div class="p-4 sm:p-6">
+            <div class="flex min-h-0 flex-1 flex-col p-4 sm:p-6">
             <div class="mb-4 flex items-center justify-between">
               <h2 id="product-single-price-modal-title" class="text-xl font-bold text-gray-900">Editar Preço</h2>
               <button
@@ -2700,7 +2973,7 @@ async function submitSinglePrice(): Promise<void> {
               </button>
             </div>
 
-            <div class="space-y-4">
+            <div class="min-h-0 flex-1 overflow-y-auto pr-2 space-y-4">
               <div>
                 <label for="single_cost" class="mb-1 block text-sm font-medium text-gray-700">Preço de Custo</label>
                 <input
@@ -2740,8 +3013,9 @@ async function submitSinglePrice(): Promise<void> {
               <div v-if="singlePriceError" class="rounded bg-red-100 p-3 text-sm text-danger" role="alert">
                 {{ singlePriceError }}
               </div>
+            </div>
 
-              <div class="flex justify-end gap-3 pt-2">
+              <div class="flex shrink-0 justify-end gap-3 pt-4 border-t mt-4 border-gray-100">
                 <button
                   type="button"
                   class="rounded border border-gray-300 px-4 py-2 font-medium text-gray-700 transition hover:bg-gray-50"
@@ -2768,7 +3042,6 @@ async function submitSinglePrice(): Promise<void> {
                   <span>{{ singlePriceLoading ? "Salvando..." : "Salvar" }}</span>
                 </button>
               </div>
-            </div>
             </div>
           </div>
         </div>

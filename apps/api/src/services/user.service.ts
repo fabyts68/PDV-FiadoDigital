@@ -41,11 +41,12 @@ export class UserService {
   }
 
   async update(id: string, payload: Partial<CreateUserPayload>, changedById: string) {
-    const { password, name, username, can_view_cost_price } = payload;
+    const { password, name, username, can_view_cost_price, is_active } = payload;
     const updateData: UpdateUserData = {
       name,
       username,
       can_view_cost_price,
+      is_active,
     };
 
     if (password) {
@@ -66,7 +67,17 @@ export class UserService {
     return userRepository.update(id, updateData);
   }
 
-  async deactivate(id: string) {
-    return userRepository.softDelete(id);
+  async deactivate(id: string, operatorId: string) {
+    const result = await userRepository.softDelete(id);
+
+    await auditLogRepository.create({
+      action: "user_deleted",
+      actor_id: operatorId,
+      entity_type: "user",
+      entity_id: id,
+      details: { target_user_id: id },
+    });
+
+    return result;
   }
 }
