@@ -38,11 +38,11 @@ const palette: Record<PaymentKey, string> = {
 };
 
 const metadata: Record<PaymentKey, { label: string; icon: string }> = {
-  cash:        { label: "Dinheiro", icon: "💵" },
-  pix:         { label: "Pix",      icon: "📱" },
-  credit_card: { label: "Crédito",  icon: "💳" },
-  debit_card:  { label: "Débito",   icon: "💳" },
-  fiado:       { label: "Fiado",    icon: "📒" },
+  cash:        { label: "Dinheiro", icon: "" },
+  pix:         { label: "Pix",      icon: "" },
+  credit_card: { label: "Crédito",  icon: "" },
+  debit_card:  { label: "Débito",   icon: "" },
+  fiado:       { label: "Fiado",    icon: "" },
 };
 
 const keys: PaymentKey[] = ["cash", "pix", "credit_card", "debit_card", "fiado"];

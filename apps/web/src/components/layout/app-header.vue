@@ -145,8 +145,7 @@ onUnmounted(() => {
         aria-live="polite"
         class="inline-flex items-center gap-1 rounded bg-amber-50 px-2 py-1 text-xs font-medium text-warning md:text-sm"
       >
-        <span class="text-xl leading-none select-none" aria-hidden="true">⚠️</span>
-        <span>Servidor indisponível</span>
+        <span class="text-sm leading-none select-none" aria-hidden="true">Offline</span>
       </div>
 
       <!-- Badge de notificações -->
@@ -157,7 +156,7 @@ onUnmounted(() => {
           class="relative flex min-h-11 min-w-11 items-center justify-center rounded-full transition-colors hover:bg-surface"
           @click.stop="toggleNotificationPanel"
         >
-          <span class="text-xl leading-none select-none" aria-hidden="true">🔔</span>
+          <span class="text-sm leading-none select-none" aria-hidden="true">N</span>
           <span
             v-if="unreadCount > 0"
             aria-hidden="true"

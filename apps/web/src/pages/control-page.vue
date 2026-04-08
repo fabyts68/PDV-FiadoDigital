@@ -292,31 +292,31 @@ const paymentDistribution = computed(() => {
     {
       key: "cash",
       label: "Dinheiro",
-      icon: "💵",
+      icon: "",
       value: cashSummary.value.cash_cents,
     },
     {
       key: "credit_card",
       label: "Cartão de Crédito",
-      icon: "💳",
+      icon: "",
       value: cashSummary.value.credit_card_cents,
     },
     {
       key: "debit_card",
       label: "Cartão de Débito",
-      icon: "💳",
+      icon: "",
       value: cashSummary.value.debit_card_cents,
     },
     {
       key: "pix",
       label: "Pix",
-      icon: "📱",
+      icon: "",
       value: cashSummary.value.pix_cents,
     },
     {
       key: "fiado",
       label: "Fiado",
-      icon: "📒",
+      icon: "",
       value: cashSummary.value.fiado_cents,
     },
   ];
@@ -850,7 +850,7 @@ async function loadCancellations(): Promise<void> {
                 class="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-gray-200 text-gray-600 transition hover:bg-surface mb-1"
                 @click="showMonetaryValues = !showMonetaryValues"
               >
-                {{ showMonetaryValues ? "👁" : "🙈" }}
+                {{ showMonetaryValues ? 'Ocultar' : 'Exibir' }}
               </button>
             </div>
           </div>
@@ -1218,7 +1218,7 @@ async function loadCancellations(): Promise<void> {
                       v-if="row.low_stock"
                       class="shrink-0 rounded-full bg-danger/10 px-2 py-0.5 text-xs font-semibold text-danger"
                     >
-                      ⚠️ Baixo
+                      Estoque baixo
                     </span>
                   </div>
 
@@ -1483,7 +1483,7 @@ async function loadCancellations(): Promise<void> {
                   v-if="topOperatorAlert"
                   class="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700"
                 >
-                  ⚠️ {{ topOperatorAlert.operator_name }} realizou
+                  {{ topOperatorAlert.operator_name }} realizou
                   {{ topOperatorAlert.count }} cancelamentos hoje.
                 </span>
               </div>

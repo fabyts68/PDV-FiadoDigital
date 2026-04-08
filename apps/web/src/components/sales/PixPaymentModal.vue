@@ -130,7 +130,7 @@ function handleCancel() {
                 :class="pixCopied ? 'bg-green-600 text-white' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'"
                 @click="copyPixCodigo"
               >
-                {{ pixCopied ? '✅ Copiado!' : 'Copiar' }}
+                {{ pixCopied ? 'Copiado!' : 'Copiar' }}
               </button>
             </div>
           </div>
@@ -144,7 +144,7 @@ function handleCancel() {
               {{ pixStatusLabel }}
             </p>
             <p class="mt-2 text-sm text-amber-900">
-              ⚠️ Verifique o recebimento no aplicativo do banco antes de confirmar.
+              Verifique o recebimento no aplicativo do banco antes de confirmar.
             </p>
           </div>
         </div>
@@ -213,7 +213,7 @@ function handleCancel() {
           Chave Pix (final): <strong>{{ pixKeySuffix }}</strong>
         </p>
         <p class="text-amber-800">
-          ⚠️ Verifique no aplicativo do banco para evitar confirmação indevida.
+          Verifique no aplicativo do banco para evitar confirmação indevida.
         </p>
       </div>
 

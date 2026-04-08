@@ -596,7 +596,7 @@ watch(
       };
 
       const toastId = `stock-alert-${payload.productId}-${Date.now()}`;
-      const alertMessage = `⚠️ Estoque baixo: ${payload.productName} (${payload.stock_quantity} ${payload.stock_quantity === 1 ? "unidade restante" : "unidades restantes"})`;
+      const alertMessage = `Estoque baixo: ${payload.productName} (${payload.stock_quantity} ${payload.stock_quantity === 1 ? "unidade restante" : "unidades restantes"})`;
 
       stockAlertToasts.value.push({
         id: toastId,
@@ -2358,7 +2358,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
           aria-live="assertive"
           aria-atomic="true"
         >
-          <span class="text-lg">⚠️</span>
+          <span class="text-lg">Aviso</span>
           <div class="flex-1">
             <p class="text-sm font-medium text-amber-900">{{ toast.message }}</p>
           </div>
@@ -3303,7 +3303,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
                   :class="pixCopied ? 'bg-green-600 text-white' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'"
                   @click="copyPixCodigo"
                 >
-                  {{ pixCopied ? '✅ Copiado!' : 'Copiar' }}
+                  {{ pixCopied ? 'Copiado!' : 'Copiar' }}
                 </button>
               </div>
             </div>
@@ -3317,7 +3317,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
                 {{ pixStatusLabel }}
               </p>
               <p class="mt-2 text-sm text-amber-900">
-                ⚠️ Verifique o recebimento no aplicativo do banco antes de confirmar.
+                Verifique o recebimento no aplicativo do banco antes de confirmar.
               </p>
             </div>
           </div>
@@ -3386,7 +3386,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
             Chave Pix (final): <strong>{{ pixKeySuffix }}</strong>
           </p>
           <p class="text-amber-800">
-            ⚠️ Verifique no aplicativo do banco para evitar confirmação indevida.
+            Verifique no aplicativo do banco para evitar confirmação indevida.
           </p>
         </div>
 
@@ -3597,7 +3597,7 @@ function captureScannerInput(event: KeyboardEvent): boolean {
     </Teleport>
   </div>
 
-  <div id="print-receipt" class="hidden print:block print:w-[80mm] print:max-w-[300px] print:mx-auto print:text-black print:bg-white font-mono text-[11px] leading-tight text-black">
+  <div id="print-receipt" class="hidden print:block print:w-[58mm] print:max-w-[240px] print:mx-auto print:text-black print:bg-white font-mono text-[11px] leading-tight text-black">
     <div class="mb-2 text-center">
       <p class="text-sm font-bold">{{ storeName }}</p>
       <p>{{ storeAddress }}</p>

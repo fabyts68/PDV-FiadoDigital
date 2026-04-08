@@ -1715,7 +1715,7 @@ async function handleAtivar(customer: Customer) {
                           class="min-h-11 inline-flex items-center gap-1 rounded bg-success/10 px-3 text-xs font-semibold text-success transition hover:bg-success/20"
                           @click="openWhatsAppModal(customer)"
                         >
-                          <span>Cobrar 💰</span>
+                          <span>Cobrar</span>
                         </button>
 
                         <div class="flex items-center gap-1">
@@ -1949,7 +1949,7 @@ async function handleAtivar(customer: Customer) {
                     class="flex min-h-[52px] items-center gap-3 border-b border-gray-100 px-4 text-sm text-gray-700 transition hover:bg-gray-50 active:bg-gray-100"
                     @click="openPaymentModal(customer)"
                   >
-                    <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-base">💳</span>
+                    <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-base">CC</span>
                     <div class="text-left">
                       <p class="font-medium">Registrar Pagamento</p>
                       <p class="text-xs text-gray-400">Quitar total ou parcial</p>
@@ -1961,7 +1961,7 @@ async function handleAtivar(customer: Customer) {
                     class="flex min-h-[52px] items-center gap-3 border-b border-gray-100 px-4 text-sm text-gray-700 transition hover:bg-gray-50 active:bg-gray-100"
                     @click="openEditModal(customer); expandedCustomerId = null"
                   >
-                    <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-purple-50 text-base">✏️</span>
+                    <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-purple-50 text-base">E</span>
                     <div class="text-left">
                       <p class="font-medium">Editar Cliente</p>
                       <p class="text-xs text-gray-400">Nome, telefone, limite</p>
@@ -1987,7 +1987,7 @@ async function handleAtivar(customer: Customer) {
                     class="flex min-h-[52px] items-center gap-3 border-b border-gray-100 px-4 text-sm text-gray-700 transition hover:bg-gray-50 active:bg-gray-100"
                     @click="handleAtivar(customer); expandedCustomerId = null"
                   >
-                    <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-green-50 text-base">✅</span>
+                    <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-green-50 text-base">OK</span>
                     <div class="text-left">
                       <p class="font-medium text-green-700">Ativar Cliente</p>
                       <p class="text-xs text-gray-400">Permitir vendas em fiado</p>
@@ -3039,14 +3039,14 @@ async function handleAtivar(customer: Customer) {
                   class="min-h-11 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-green-700"
                   @click="shareReceiptWhatsApp"
                 >
-                  📲 WhatsApp
+                  WhatsApp
                 </button>
                 <button
                   type="button"
                   class="min-h-11 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition hover:bg-primary-dark"
                   @click="printReceipt"
                 >
-                  🖨️ Imprimir
+                  Imprimir
                 </button>
               </div>
             </div>

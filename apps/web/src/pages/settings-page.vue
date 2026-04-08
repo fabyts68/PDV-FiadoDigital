@@ -1541,9 +1541,9 @@ async function submitRestore(): Promise<void> {
   }
 
   const ok = await confirm({
-    title: "⚠️ AVISO CRÍTICO: Restauração de Sistema",
+    title: "Aviso crítico: restauração de sistema",
     message: "O sistema será paralisado, os terminais logados serão desconectados temporariamente e o serviço será reiniciado. Todos os dados atuais do escopo selecionado serão substituídos. Deseja prosseguir?",
-    confirmLabel: "Sim, Restaurar Sistema",
+    confirmLabel: "Sim, restaurar sistema",
   });
 
   if (!ok) return;
@@ -2142,7 +2142,7 @@ async function submitRestore(): Promise<void> {
                           :aria-label="`Editar maquininha ${machine.name}`"
                           @click="openEditCardMachineModal(machine)"
                         >
-                          ✏️
+                          E
                         </button>
                         <button
                           type="button"
@@ -2165,7 +2165,7 @@ async function submitRestore(): Promise<void> {
                           :aria-label="`Excluir maquininha ${machine.name}`"
                           @click="deleteCardMachine(machine)"
                         >
-                          🗑️
+                          Excluir
                         </button>
                       </div>
                     </td>
@@ -2228,7 +2228,7 @@ async function submitRestore(): Promise<void> {
                     :aria-label="`Editar maquininha ${machine.name}`"
                     @click="openEditCardMachineModal(machine)"
                   >
-                    ✏️ Editar
+                    Editar
                   </button>
 
                   <button
@@ -2251,7 +2251,7 @@ async function submitRestore(): Promise<void> {
                     :aria-label="`Excluir maquininha ${machine.name}`"
                     @click="deleteCardMachine(machine)"
                   >
-                    🗑️
+                    Excluir
                   </button>
                 </div>
               </li>

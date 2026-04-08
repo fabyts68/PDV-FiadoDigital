@@ -391,14 +391,14 @@ onUnmounted(() => {
               class="flex min-h-11 items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors hover:bg-gray-50"
               :aria-label="`Modo atual: ${viewMode === 'manager' ? 'Gerente' : 'Operador'}. Clique para alternar.`"
             >
-              <span>{{ viewMode === "manager" ? "📊 Gerente" : "🖥️ Operador" }}</span>
+              <span>{{ viewMode === "manager" ? "Gerente" : "Operador" }}</span>
             </button>
             <button
               @click="showMonetaryValues = !showMonetaryValues"
               class="rounded-full p-2 transition-colors hover:bg-gray-100"
               :aria-label="showMonetaryValues ? 'Ocultar valores' : 'Mostrar valores'"
             >
-              {{ showMonetaryValues ? "👁" : "🙈" }}
+              {{ showMonetaryValues ? 'Ocultar' : 'Exibir' }}
             </button>
             <button
               @click="loadDashboard"
@@ -406,7 +406,7 @@ onUnmounted(() => {
               class="rounded-full p-2 transition-colors hover:bg-gray-100"
               aria-label="Atualizar dados"
             >
-              <span :class="{ 'animate-spin': isLoading }">🔄</span>
+              Atualizar
             </button>
           </div>
         </div>
@@ -451,7 +451,7 @@ onUnmounted(() => {
           role="alert"
           class="mb-4 flex items-center justify-between rounded-lg bg-danger/10 px-4 py-3 text-danger"
         >
-          <span>⚠️ Falha ao carregar os dados. Toque para tentar novamente.</span>
+          <span>Falha ao carregar os dados. Toque para tentar novamente.</span>
           <button @click="loadDashboard" class="font-semibold underline">Tentar</button>
         </div>
 
@@ -461,14 +461,14 @@ onUnmounted(() => {
           aria-live="polite"
           class="mb-4 rounded-lg bg-warning/10 px-4 py-3 text-sm text-warning"
         >
-          ⚠️ Conexão offline — dados podem estar desatualizados.
+          Conexão offline — dados podem estar desatualizados.
         </div>
 
         <div v-if="summary || isLoading">
           <div class="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
             <div class="rounded-xl bg-white p-4 shadow-sm ring-2 ring-success col-span-2 lg:col-span-1">
               <div class="mb-1 flex items-center justify-between">
-                <span class="text-2xl">💰</span>
+                <span class="text-base font-medium text-gray-600">Total</span>
                 <TrendBadge
                   v-if="viewMode === 'manager'"
                   :today="summary?.financial.total_sales_cents"
@@ -489,7 +489,7 @@ onUnmounted(() => {
 
             <div class="rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
               <div class="mb-1 flex items-center justify-between">
-                <span class="text-2xl">📒</span>
+                <span class="text-base font-medium text-gray-600">Fiado</span>
                 <TrendBadge
                   v-if="viewMode === 'manager'"
                   :today="summary?.financial.by_payment_method.fiado"
@@ -513,8 +513,7 @@ onUnmounted(() => {
               class="rounded-xl bg-white p-4 shadow-sm ring-1 transition-all"
               :class="cancellationsCardClass"
             >
-              <span class="mb-1 block text-2xl">🗑️</span>
-              <p class="text-xs font-medium uppercase tracking-wide text-gray-500">Cancelamentos {{ periodLabel }}</p>
+              <p class="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500">Cancelamentos {{ periodLabel }}</p>
               <p
                 class="mt-1 text-3xl leading-none font-bold"
                 :class="(summary?.financial.cancellations_count ?? 0) > 0 ? 'text-danger' : 'text-gray-400'"
@@ -535,8 +534,7 @@ onUnmounted(() => {
               class="rounded-xl bg-white p-4 shadow-sm ring-1 transition-all"
               :class="discountCardClass"
             >
-              <span class="mb-1 block text-2xl">🪙</span>
-              <p class="text-xs font-medium uppercase tracking-wide text-gray-500">Perda no Troco</p>
+              <p class="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500">Perda no Troco</p>
               <p class="mt-1 text-3xl leading-none font-bold" :class="discountColor">
                 <template v-if="isLoading"><span class="skeleton inline-block h-8 w-24 rounded" /></template>
                 <template v-else-if="showMonetaryValues">{{ formatCents(summary?.financial.discount_total_cents ?? 0) }}</template>
@@ -552,7 +550,7 @@ onUnmounted(() => {
               v-if="viewMode === 'operator'"
               class="col-span-2 rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100 lg:col-span-2"
             >
-              <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">🏧 Status do caixa</h2>
+              <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">Status do caixa</h2>
               <div v-if="isLoading" class="skeleton h-24 w-full rounded-lg" />
               <div v-else-if="summary?.open_cash_register" class="space-y-2">
                 <div class="flex items-center gap-2">
@@ -580,7 +578,7 @@ onUnmounted(() => {
               v-if="viewMode === 'operator'"
               class="col-span-2 rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100 lg:col-span-2"
             >
-              <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">⚡ Acesso rápido</h2>
+              <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">Acesso rápido</h2>
               <router-link
                 to="/sales"
                 class="flex min-h-11 w-full items-center justify-center rounded-xl bg-primary px-4 py-3 text-sm font-bold text-white"
@@ -594,7 +592,7 @@ onUnmounted(() => {
               v-if="viewMode === 'operator'"
               class="col-span-2 rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100 lg:col-span-4"
             >
-              <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">🔔 Notificações críticas</h2>
+              <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">Notificações críticas</h2>
               <div v-if="isLoading">
                 <div v-for="i in 3" :key="`critical-skeleton-${i}`" class="skeleton mb-2 h-12 w-full rounded-lg" />
               </div>
@@ -636,14 +634,14 @@ onUnmounted(() => {
 
             <div class="rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
               <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500">⚠️ Faltando na Prateleira</h2>
+                <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500">Faltando na prateleira</h2>
                 <div class="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     class="min-h-11 rounded-lg border px-3 py-2 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50"
                     @click="printShoppingList"
                   >
-                    🛒 Gerar Lista de Compras
+                    Gerar lista de compras
                   </button>
                   <router-link to="/products" class="text-xs text-primary hover:underline">
                     Ver todos →
@@ -656,7 +654,7 @@ onUnmounted(() => {
               <p
                 v-else-if="!summary?.stock_alerts.length"
                 class="text-sm text-gray-500"
-              >✅ Tudo em estoque.</p>
+              >Tudo em estoque.</p>
               <ul v-else class="space-y-2">
                 <li
                   v-for="item in summary.stock_alerts"
@@ -687,7 +685,7 @@ onUnmounted(() => {
           <div v-if="viewMode === 'manager'" class="grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-2">
             <div class="rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
               <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500">📒 Fiado vencido</h2>
+                <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500">Fiado vencido</h2>
                 <router-link to="/customers" class="text-xs text-primary hover:underline">
                   Ver todos →
                 </router-link>
@@ -698,7 +696,7 @@ onUnmounted(() => {
               <p
                 v-else-if="!summary?.overdue_customers.length"
                 class="text-sm text-gray-500"
-              >✅ Nenhum cliente com fiado vencido.</p>
+              >Nenhum cliente com fiado vencido.</p>
               <ul v-else class="space-y-2">
                 <li
                   v-for="customer in summary.overdue_customers"
@@ -722,7 +720,7 @@ onUnmounted(() => {
             </div>
 
             <div class="rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
-              <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">🏧 Caixa</h2>
+              <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">Caixa</h2>
               <div v-if="isLoading" class="skeleton h-24 w-full rounded-lg" />
               <div v-else-if="summary?.open_cash_register" class="space-y-2">
                 <div class="flex items-center gap-2">
@@ -769,7 +767,7 @@ onUnmounted(() => {
           >
             <div class="mx-auto max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
               <h2 id="charge-modal-title" class="mb-4 text-lg font-bold text-gray-900">
-                📒 Cobrar fiado
+                Cobrar fiado
               </h2>
               <p class="mb-1 text-2xl font-bold text-warning">
                 {{ showMonetaryValues ? formatCents(selectedCustomer?.current_debt_cents ?? 0) : "R$ ••••" }}

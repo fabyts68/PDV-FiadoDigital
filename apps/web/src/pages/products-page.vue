@@ -1724,7 +1724,7 @@ async function submitSinglePrice(): Promise<void> {
                     v-if="product.stock_quantity < product.min_stock_alert"
                     class="shrink-0 rounded-full bg-danger/10 px-2 py-0.5 text-xs font-semibold text-danger"
                   >
-                    ⚠️ Baixo
+                    Estoque baixo
                   </span>
                 </div>
 
@@ -1758,7 +1758,7 @@ async function submitSinglePrice(): Promise<void> {
                   :aria-label="`Editar produto ${product.name}`"
                   @click="openEditProductModal(product)"
                 >
-                  ⚙️ Editar produto
+                  Editar produto
                 </button>
               </li>
 
@@ -1906,7 +1906,7 @@ async function submitSinglePrice(): Promise<void> {
                           class="rounded p-1.5 text-primary transition hover:bg-gray-100"
                           @click="openEditProductTypeModal(item)"
                         >
-                          ✏️
+                          Editar
                         </button>
                         <button
                           type="button"
@@ -1914,7 +1914,7 @@ async function submitSinglePrice(): Promise<void> {
                           class="rounded p-1.5 text-danger transition hover:bg-red-50"
                           @click="deactivateProductType(item.id)"
                         >
-                          🗑️
+                          Excluir
                         </button>
                       </div>
                     </td>
@@ -1946,7 +1946,7 @@ async function submitSinglePrice(): Promise<void> {
                     :aria-label="`Editar tipo ${item.name}`"
                     @click="openEditProductTypeModal(item)"
                   >
-                    ✏️
+                    E
                   </button>
                   <button
                     type="button"
@@ -1954,7 +1954,7 @@ async function submitSinglePrice(): Promise<void> {
                     :aria-label="`Desativar tipo ${item.name}`"
                     @click="deactivateProductType(item.id)"
                   >
-                    🗑️
+                    X
                   </button>
                 </div>
               </li>

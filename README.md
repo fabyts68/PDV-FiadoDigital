@@ -1,5 +1,4 @@
-<<<<<<< Updated upstream
-# FiadoDigital PDV
+# PDV Digital
 
 ![Versão](https://img.shields.io/badge/vers%C3%A3o-v4.1.0-blue.svg)
 ![Node.js](https://img.shields.io/badge/Node.js-20.x-green.svg)
@@ -7,17 +6,71 @@
 ![SQLite](https://img.shields.io/badge/SQLite-WAL-003B57.svg)
 ![CI](https://img.shields.io/badge/CI-GitHub_Actions-2088FF.svg)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-blue.svg)
-=======
-# PDV Digital
 
-Sistema de Ponto de Venda (PDV) híbrido e local para pequenos comércios. Controle de vendas, estoque, clientes com crédito, dashboard gerencial e impressão de cupom não fiscal. **Não emite NF-e** — o único comprovante é o cupom/recibo não fiscal impresso.
->>>>>>> Stashed changes
+PDV Digital é um sistema de Ponto de Venda híbrido e local para pequenos comércios. Ele reúne controle de vendas, estoque, clientes com crédito, dashboard gerencial e impressão de cupom não fiscal. O sistema não emite NF-e; o documento gerado é um comprovante ou recibo não fiscal.
 
-## Descrição do Projeto (O Problema e a Solução)
+---
 
-Muitos pequenos comerciantes (mercearias, mercadinhos e padarias) operam com a concessão de crédito informal aos seus clientes frequentes — o famoso "fiado" no "caderninho". Essa prática, embora fundamental para a fidelização local, frequentemente ocorre sem garantias formais, resultando em desorganização nos recebimentos, atritos no momento da cobrança, alto risco financeiro e inadimplência.
+## Descrição do Projeto
 
-A solução é o **FiadoDigital PDV**, um sistema híbrido de Ponto de Venda projetado especificamente para o pequeno varejo de bairro, de forma local e offline-first. Ele substitui o caderninho por uma gestão inteligente com digitalização do fiado, incluindo mecanismos de gestão de risco como bloqueio automático de inadimplentes, além de facilitar a comunicação via WhatsApp para cobranças e envio de recibos digitais. A plataforma estabiliza o fluxo de caixa enquanto mantém a relação de confiança do lojista com seus clientes.
+Pequenos comerciantes como mercearias, mercadinhos e padarias frequentemente fazem vendas a crédito para clientes fiéis. Sem um sistema confiável, esse controle é feito em cadernos informais, o que aumenta o risco de inadimplência, reduz o controle financeiro e dificulta a organização.
+
+PDV Digital substitui esse caderno por uma gestão digital simples, local e offline-friendly. O sistema organiza vendas, fiado, caixa e estoque, além de fornecer alertas operacionais e opções de cobrança digital.
+
+---
+
+## Funcionalidades Principais
+
+- **Autenticação Obrigatória:** Todas as páginas exigem login com usuário e senha.
+- **Gestão de Clientes:** Cadastro completo, limite de crédito individual, bloqueio inteligente de inadimplentes e cobrança via WhatsApp.
+- **Frente de Caixa:** Suporte a múltiplos meios de pagamento por venda: dinheiro, PIX, cartão e fiado.
+- **Acesso Mobile:** Espelhamento por QR Code para uso em dispositivos móveis.
+- **Dashboard e Relatórios:** Indicadores de vendas, alertas de estoque e histórico com recibos.
+- **Alertas Operacionais:** Estoque mínimo, fechamento de caixa e limites de crédito.
+- **Backup:** Backup manual ou agendado com restauração parcial por módulo.
+- **Modo Offline:** Operações em fila local que são reaplicadas quando a conexão retorna.
+
+---
+
+## Guia de Uso para Clientes
+
+### 1. Acesso inicial
+
+1. Abra o navegador e acesse `http://localhost:5173/login`.
+2. Faça login com as credenciais fornecidas pelo administrador.
+3. Caso necessário, altere a senha do usuário após o primeiro acesso.
+
+### 2. Painel principal
+
+- O painel exibe resumo de vendas, caixa e alertas de estoque.
+- Use filtros de período para consultar dados diários, semanais ou mensais.
+- Em caso de desconexão, o sistema mantém os dados locais e sincroniza quando a conexão retorna.
+
+### 3. Registrar uma venda
+
+1. Abra a aba **Vendas**.
+2. Selecione os produtos e ajuste as quantidades.
+3. Escolha os meios de pagamento.
+4. Finalize a venda e imprima o recibo se necessário.
+
+### 4. Cadastrar produtos
+
+- Acesse **Produtos**.
+- Clique em **Novo produto**.
+- Informe nome, preço, código de barras, estoque e categoria.
+- Salve para disponibilizar o produto no PDV.
+
+### 5. Cadastrar clientes
+
+- Acesse **Clientes**.
+- Registre nome, telefone, limite de crédito e vencimento.
+- Acompanhe o histórico de fiado e pagamentos.
+
+### 6. Controle de caixa
+
+- Abra o caixa no início do turno.
+- Registre movimentações de sangria e depósitos.
+- Feche o caixa ao final do turno e compare o saldo.
 
 ---
 
@@ -34,14 +87,14 @@ A solução é o **FiadoDigital PDV**, um sistema híbrido de Ponto de Venda pro
 
 ## Funcionalidades Principais
 
-- 🔐 **Autenticação Obrigatória:** Todas as páginas exigem login com usuário e senha. Nenhuma rota é pública.
-- 👥 **Gestão de Clientes ("Caderninho Digital"):** cadastro completo, limite de crédito individual, status inteligente (bloqueio automático de inadimplentes), cobrança via WhatsApp, quitação protegida por PIN de segurança.
-- 🛒 **Frente de Caixa:** multimeios de pagamento (até dois meios por venda: dinheiro, PIX, cartão, fiado), cálculo automático de taxas de maquineta, arredondamento de troco configurável.
-- 📱 **Acesso Smartphone:** espelhamento via QR Code, gestão de estoque da prateleira, cobrança móvel.
-- 📊 **Dashboard e Relatórios:** gráficos de rosca por modalidade de pagamento, alertas de ruptura de estoque, histórico com recibos em PDF, acompanhamento de pagamentos parciais.
-- 🔔 **Alertas Inteligentes:** estoque mínimo, sangria de caixa, alerta de fiado ao atingir 90% do limite.
-- 💾 **Backup:** manual ou agendado, com criptografia opcional e restauração parcial por módulo.
-- 🌐 **Modo Offline:** fila transacional com replay automático e idempotência via `use-offline-queue.ts`.
+- **Autenticação Obrigatória:** Todas as páginas exigem login com usuário e senha. Nenhuma rota é pública.
+- **Gestão de Clientes:** cadastro completo, limite de crédito individual, status inteligente (bloqueio automático de inadimplentes), cobrança via WhatsApp, quitação protegida por PIN de segurança.
+- **Frente de Caixa:** multimeios de pagamento (até dois meios por venda: dinheiro, PIX, cartão, fiado), cálculo automático de taxas de maquineta, arredondamento de troco configurável.
+- **Acesso Smartphone:** espelhamento via QR Code, gestão de estoque da prateleira, cobrança móvel.
+- **Dashboard e Relatórios:** gráficos de rosca por modalidade de pagamento, alertas de ruptura de estoque, histórico com recibos em PDF, acompanhamento de pagamentos parciais.
+- **Alertas Inteligentes:** estoque mínimo, sangria de caixa, alerta de fiado ao atingir 90% do limite.
+- **Backup:** manual ou agendado, com criptografia opcional e restauração parcial por módulo.
+- **Modo Offline:** fila transacional com replay automático e idempotência via `use-offline-queue.ts`.
 
 ---
 
@@ -61,7 +114,7 @@ O projeto é construído em um monorepo (`pnpm workspaces`) que abriga três pac
 
 ```text
 ┌──────────────────────────────────────────────────────┐
-│                  PDV FiadoDigital                    │
+│                    PDV Digital                    │
 │                                                      │
 │   ┌────────────┐   HTTP/REST    ┌──────────────────┐ │
 │   │  apps/web  │ ◄────────────► │    apps/api      │ │
@@ -148,7 +201,7 @@ Ao executar a migração original, as credenciais para o operador gerencial são
 | Senha | `admin123` |
 | PIN gerencial | `123456` |
 
-> ⚠️ Troque imediatamente em qualquer ambiente não-descartável.
+> Troque imediatamente em qualquer ambiente não-descartável.
 
 ### 7.4 Scripts disponíveis
 
@@ -219,17 +272,17 @@ As configurações sensíveis ficam encapsuladas de forma central, com definiç�
 
 | Variável | Obrigatória | Descrição |
 |---|---|---|
-| `JWT_SECRET` | ✅ | Chave de assinatura dos access tokens |
-| `JWT_REFRESH_SECRET` | ✅ | Chave de assinatura dos refresh tokens |
-| `DATABASE_URL` | ✅ | Caminho do arquivo SQLite (`file:./data/dev.db`) |
-| `NODE_ENV` | ✅ | Define as métricas e optimizações contextuais (`development` / `production`) |
-| `CORS_ORIGIN` | ✅ | Proteção origin da plataforma de request (ex: `http://localhost:5173`) |
+| `JWT_SECRET` | Sim | Chave de assinatura dos access tokens |
+| `JWT_REFRESH_SECRET` | Sim | Chave de assinatura dos refresh tokens |
+| `DATABASE_URL` | Sim | Caminho do arquivo SQLite (`file:./data/dev.db`) |
+| `NODE_ENV` | Sim | Define as métricas e otimizações contextuais (`development` / `production`) |
+| `CORS_ORIGIN` | Sim | Proteção origin da plataforma de request (ex: `http://localhost:5173`) |
 | `PORT` | - | Porta global de operação |
 | `APP_TIME_ZONE` | - | Formatação universal restrita no backend |
 | `PIX_KEY_TYPE` | - | Configuração do Pix |
 | `PIX_KEY` | - | Referência do pix do comércio |
-| `VITE_API_URL` | ✅ | URL resolvida pelo roteador Vue via proxy local, no path do workspace Frontend (`@pdv/web`). |
-| `VITE_WS_URL` | ✅ | Conector das instâncias e canais locais dos WebSockets no Frontend (`@pdv/web`). |
+| `VITE_API_URL` | Sim | URL resolvida pelo roteador Vue via proxy local, no path do workspace Frontend (`@pdv/web`). |
+| `VITE_WS_URL` | Sim | Conector das instâncias e canais locais dos WebSockets no Frontend (`@pdv/web`). |
 
 ---
 
