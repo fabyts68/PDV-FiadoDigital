@@ -2926,7 +2926,6 @@ async function handleAtivar(customer: Customer) {
                   id="customer-receipt-modal-title"
                   class="text-xl font-bold text-gray-900"
                 >
-<<<<<<< Updated upstream
                   Comprovante de Compra
                 </h2>
                 <button
@@ -2952,65 +2951,22 @@ async function handleAtivar(customer: Customer) {
                 </button>
               </div>
 
-              <div
-                class="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-4 font-mono text-sm"
-              >
-=======
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <div class="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-4 font-mono text-sm">
-              <div class="border-b border-dashed border-gray-400 pb-2 text-center font-bold">
-                PDV Digital
-              </div>
-              <div class="space-y-1 border-b border-dashed border-gray-400 pb-2">
-                <p>
-                  <span class="text-gray-600">Cliente:</span>
-                  <span class="ml-1 font-medium text-gray-900">{{ selectedHistoryCustomer?.name }}</span>
-                </p>
-                <p>
-                  <span class="text-gray-600">Data:</span>
-                  <span class="ml-1 font-medium text-gray-900">{{ formatDateTimeWithConnector(selectedReceiptSale.created_at) }}</span>
-                </p>
-                <p>
-                  <span class="text-gray-600">Terminal:</span>
-                  <span class="ml-1 font-medium text-gray-900">{{ selectedReceiptSale.terminal_id }}</span>
-                </p>
-              </div>
-
-              <div class="border-b border-dashed border-gray-400 pb-2">
-                <p class="mb-1 font-bold text-gray-800">ITENS DA COMPRA</p>
->>>>>>> Stashed changes
-                <div
-                  class="border-b border-dashed border-gray-400 pb-2 text-center font-bold"
-                >
-                  PDV FIADODIGITAL
+              <div class="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-4 font-mono text-sm">
+                <div class="border-b border-dashed border-gray-400 pb-2 text-center font-bold">
+                  PDV Digital
                 </div>
-
-                <div
-                  class="space-y-1 border-b border-dashed border-gray-400 pb-2"
-                >
+                <div class="space-y-1 border-b border-dashed border-gray-400 pb-2">
                   <p>
                     <span class="text-gray-600">Cliente:</span>
-                    <span class="ml-1 font-medium text-gray-900">{{
-                      selectedHistoryCustomer?.name
-                    }}</span>
+                    <span class="ml-1 font-medium text-gray-900">{{ selectedHistoryCustomer?.name }}</span>
                   </p>
                   <p>
                     <span class="text-gray-600">Data:</span>
-                    <span class="ml-1 font-medium text-gray-900">{{
-                      formatDateTimeWithConnector(
-                        selectedReceiptSale.created_at,
-                      )
-                    }}</span>
+                    <span class="ml-1 font-medium text-gray-900">{{ formatDateTimeWithConnector(selectedReceiptSale.created_at) }}</span>
                   </p>
                   <p>
                     <span class="text-gray-600">Terminal:</span>
-                    <span class="ml-1 font-medium text-gray-900">{{
-                      selectedReceiptSale.terminal_id
-                    }}</span>
+                    <span class="ml-1 font-medium text-gray-900">{{ selectedReceiptSale.terminal_id }}</span>
                   </p>
                 </div>
 
@@ -3022,81 +2978,50 @@ async function handleAtivar(customer: Customer) {
                     class="mb-1"
                   >
                     <div class="flex justify-between">
-                      <span class="text-gray-700"
-                        >{{ item.quantity }}x
-                        {{ getReceiptItemName(item.product_name) }}</span
-                      >
-                      <span class="text-gray-900">{{
-                        formatCents(item.total_cents)
-                      }}</span>
+                      <span class="text-gray-700">{{ item.quantity }}x {{ getReceiptItemName(item.product_name) }}</span>
+                      <span class="text-gray-900">{{ formatCents(item.total_cents) }}</span>
                     </div>
                     <div
                       v-if="item.discount_cents > 0"
                       class="mt-1 flex justify-between text-xs text-gray-500"
                     >
-                      <span
-                        >Unitário:
-                        {{ formatCents(getUnitPriceFromItem(item)) }} | Desconto
-                        item: {{ formatCents(item.discount_cents) }}</span
-                      >
+                      <span>Unitário: {{ formatCents(getUnitPriceFromItem(item)) }} | Desconto item: {{ formatCents(item.discount_cents) }}</span>
                       <span></span>
                     </div>
                   </div>
                 </div>
 
-                <div
-                  class="space-y-1 border-b border-dashed border-gray-400 pb-2"
-                >
+                <div class="space-y-1 border-b border-dashed border-gray-400 pb-2">
                   <div class="flex justify-between">
                     <span class="text-gray-600">Subtotal:</span>
-                    <span class="text-gray-900">{{
-                      formatCents(selectedReceiptSale.subtotal_cents)
-                    }}</span>
+                    <span class="text-gray-900">{{ formatCents(selectedReceiptSale.subtotal_cents) }}</span>
                   </div>
                   <div class="flex justify-between">
                     <span class="text-gray-600">Desconto:</span>
-                    <span class="text-gray-900">{{
-                      formatCents(selectedReceiptSale.discount_cents)
-                    }}</span>
+                    <span class="text-gray-900">{{ formatCents(selectedReceiptSale.discount_cents) }}</span>
                   </div>
                   <div class="flex justify-between font-bold">
                     <span>Total:</span>
-                    <span>{{
-                      formatCents(selectedReceiptSale.total_cents)
-                    }}</span>
+                    <span>{{ formatCents(selectedReceiptSale.total_cents) }}</span>
                   </div>
                 </div>
 
                 <div>
                   <p class="mb-1 font-bold text-gray-800">PAGAMENTO</p>
                   <div
-                    v-for="(
-                      payment, paymentIndex
-                    ) in selectedReceiptSale.payments"
+                    v-for="(payment, paymentIndex) in selectedReceiptSale.payments"
                     :key="paymentIndex"
                     class="flex justify-between"
                   >
-                    <span class="text-gray-600"
-                      >{{ getPaymentMethodLabel(payment.method) }}:</span
-                    >
-                    <span class="text-gray-900">{{
-                      formatCents(payment.amount_cents)
-                    }}</span>
+                    <span class="text-gray-600">{{ getPaymentMethodLabel(payment.method) }}:</span>
+                    <span class="text-gray-900">{{ formatCents(payment.amount_cents) }}</span>
                   </div>
                   <div
                     v-if="selectedReceiptSale.payments.length === 0"
                     class="flex justify-between"
                   >
-                    <span class="text-gray-600"
-                      >{{
-                        getPaymentMethodLabel(
-                          selectedReceiptSale.payment_method,
-                        )
-                      }}:</span
-                    >
-                    <span class="text-gray-900">{{
-                      formatCents(selectedReceiptSale.total_cents)
-                    }}</span>
+                    <span class="text-gray-600">{{ getPaymentMethodLabel(selectedReceiptSale.payment_method) }}:</span>
+                    <span class="text-gray-900">{{ formatCents(selectedReceiptSale.total_cents) }}</span>
                   </div>
                 </div>
               </div>
