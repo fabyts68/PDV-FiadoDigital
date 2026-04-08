@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 # FiadoDigital PDV
 
 ![Versão](https://img.shields.io/badge/vers%C3%A3o-v4.1.0-blue.svg)
@@ -6,6 +7,11 @@
 ![SQLite](https://img.shields.io/badge/SQLite-WAL-003B57.svg)
 ![CI](https://img.shields.io/badge/CI-GitHub_Actions-2088FF.svg)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-blue.svg)
+=======
+# PDV Digital
+
+Sistema de Ponto de Venda (PDV) híbrido e local para pequenos comércios. Controle de vendas, estoque, clientes com crédito, dashboard gerencial e impressão de cupom não fiscal. **Não emite NF-e** — o único comprovante é o cupom/recibo não fiscal impresso.
+>>>>>>> Stashed changes
 
 ## Descrição do Projeto (O Problema e a Solução)
 

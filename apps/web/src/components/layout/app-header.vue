@@ -131,7 +131,7 @@ onUnmounted(() => {
       >
         <span class="text-xl leading-none select-none" aria-hidden="true">☰</span>
       </button>
-      <span class="text-lg font-semibold text-primary">PDV FiadoDigital</span>
+      <span class="text-lg font-semibold text-primary">PDV Digital</span>
     </div>
 
     <div v-if="pageTitle" class="hidden flex-1 justify-center text-center lg:flex flex-row lg:w-1/3">

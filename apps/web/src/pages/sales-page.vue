@@ -2171,7 +2171,7 @@ function resetSaleState(): void {
   productEntryInput.value = "";
 }
 
-const storeName = ref("PDV FiadoDigital");
+const storeName = ref("PDV Digital");
 const storeAddress = ref("Endereço não informado");
 const storePhone = ref("Telefone não informado");
 

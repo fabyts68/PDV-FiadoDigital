@@ -12,7 +12,7 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: ["favicon.ico", "robots.txt"],
       manifest: {
-        name: "PDV FiadoDigital",
+        name: "PDV Digital",
         short_name: "PDV",
         description: "Sistema de Ponto de Venda para pequenos comércios",
         theme_color: "#1e40af",
@@ -47,11 +47,11 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": {
-        target: process.env.API_URL || "http://api:3000",
+        target: process.env.API_URL || "http://localhost:3000",
         changeOrigin: true,
       },
       "/ws": {
-        target: process.env.WS_URL || "ws://api:3000",
+        target: process.env.WS_URL || "ws://localhost:3000",
         ws: true,
       },
     },

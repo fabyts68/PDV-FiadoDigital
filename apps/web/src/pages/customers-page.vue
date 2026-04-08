@@ -2926,6 +2926,7 @@ async function handleAtivar(customer: Customer) {
                   id="customer-receipt-modal-title"
                   class="text-xl font-bold text-gray-900"
                 >
+<<<<<<< Updated upstream
                   Comprovante de Compra
                 </h2>
                 <button
@@ -2954,6 +2955,34 @@ async function handleAtivar(customer: Customer) {
               <div
                 class="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-4 font-mono text-sm"
               >
+=======
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div class="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-4 font-mono text-sm">
+              <div class="border-b border-dashed border-gray-400 pb-2 text-center font-bold">
+                PDV Digital
+              </div>
+              <div class="space-y-1 border-b border-dashed border-gray-400 pb-2">
+                <p>
+                  <span class="text-gray-600">Cliente:</span>
+                  <span class="ml-1 font-medium text-gray-900">{{ selectedHistoryCustomer?.name }}</span>
+                </p>
+                <p>
+                  <span class="text-gray-600">Data:</span>
+                  <span class="ml-1 font-medium text-gray-900">{{ formatDateTimeWithConnector(selectedReceiptSale.created_at) }}</span>
+                </p>
+                <p>
+                  <span class="text-gray-600">Terminal:</span>
+                  <span class="ml-1 font-medium text-gray-900">{{ selectedReceiptSale.terminal_id }}</span>
+                </p>
+              </div>
+
+              <div class="border-b border-dashed border-gray-400 pb-2">
+                <p class="mb-1 font-bold text-gray-800">ITENS DA COMPRA</p>
+>>>>>>> Stashed changes
                 <div
                   class="border-b border-dashed border-gray-400 pb-2 text-center font-bold"
                 >

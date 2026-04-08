@@ -43,7 +43,7 @@ onMounted(() => {
       @submit.prevent="handleLogin"
     >
       <h1 class="mb-6 text-center text-2xl font-bold text-primary">
-        PDV FiadoDigital
+        PDV Digital
       </h1>
 
       <div v-if="error" class="mb-4 rounded bg-red-100 p-3 text-sm text-danger" role="alert">
