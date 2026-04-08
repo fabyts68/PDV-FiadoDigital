@@ -1,3 +1,4 @@
+import "./load-env.js";
 import { createApp } from "./app.js";
 import { config } from "./config/index.js";
 import { initDatabase } from "./config/database.js";
