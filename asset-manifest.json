@@ -1,0 +1,20 @@
+{
+  "files": {
+    "main.css": "/PDV-FiadoDigital/static/css/main.097781c3.chunk.css",
+    "main.js": "/PDV-FiadoDigital/static/js/main.548ee444.chunk.js",
+    "main.js.map": "/PDV-FiadoDigital/static/js/main.548ee444.chunk.js.map",
+    "runtime-main.js": "/PDV-FiadoDigital/static/js/runtime-main.21c3f837.js",
+    "runtime-main.js.map": "/PDV-FiadoDigital/static/js/runtime-main.21c3f837.js.map",
+    "static/js/2.5f669e57.chunk.js": "/PDV-FiadoDigital/static/js/2.5f669e57.chunk.js",
+    "static/js/2.5f669e57.chunk.js.map": "/PDV-FiadoDigital/static/js/2.5f669e57.chunk.js.map",
+    "index.html": "/PDV-FiadoDigital/index.html",
+    "static/css/main.097781c3.chunk.css.map": "/PDV-FiadoDigital/static/css/main.097781c3.chunk.css.map",
+    "static/js/2.5f669e57.chunk.js.LICENSE.txt": "/PDV-FiadoDigital/static/js/2.5f669e57.chunk.js.LICENSE.txt"
+  },
+  "entrypoints": [
+    "static/js/runtime-main.21c3f837.js",
+    "static/js/2.5f669e57.chunk.js",
+    "static/css/main.097781c3.chunk.css",
+    "static/js/main.548ee444.chunk.js"
+  ]
+}
